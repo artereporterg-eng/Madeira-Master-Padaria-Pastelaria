@@ -1,0 +1,7 @@
+{
+  "name": "Madeira Master Padaria & Pastelaria123",
+  "description": "Sistema completo de gestão para padarias e pastelarias, incluindo RH, Financeiro, Produção e Vendas.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
