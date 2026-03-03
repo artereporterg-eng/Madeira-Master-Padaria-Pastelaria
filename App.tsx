@@ -634,6 +634,18 @@ const InventoryManager: React.FC<{
   const [initialStockProdId, setInitialStockProdId] = useState<string>('');
   const [initialStockQty, setInitialStockQty] = useState<number>(0);
 
+  const groupedIngredients = useMemo(() => {
+    const groups: Record<string, { name: string, unit: string, total: number, representativeId: string }> = {};
+    ingredients.forEach(ing => {
+      const key = `${ing.name.toLowerCase()}-${ing.unit}`;
+      if (!groups[key]) {
+        groups[key] = { name: ing.name, unit: ing.unit, total: 0, representativeId: ing.id };
+      }
+      groups[key].total += ing.quantity;
+    });
+    return Object.values(groups);
+  }, [ingredients]);
+
   const registerInitialStock = () => {
     if (!initialStockProdId || initialStockQty <= 0) {
       alert('Selecione um produto e uma quantidade válida!');
@@ -661,10 +673,16 @@ const InventoryManager: React.FC<{
     const product = products.find(p => p.id === simProdId);
     if (!product) return;
 
-    // Check if enough ingredients
+    // Check if enough ingredients (by name)
     const canProduce = product.recipe.every(r => {
-      const ing = ingredients.find(i => i.id === r.ingredientId);
-      return ing && ing.quantity >= (r.amount * simQty);
+      const recipeIng = ingredients.find(i => i.id === r.ingredientId);
+      if (!recipeIng) return false;
+      
+      const totalAvailable = ingredients
+        .filter(i => i.name.toLowerCase() === recipeIng.name.toLowerCase() && i.unit === recipeIng.unit)
+        .reduce((acc, i) => acc + i.quantity, 0);
+        
+      return totalAvailable >= (r.amount * simQty);
     });
 
     if (!canProduce) {
@@ -672,13 +690,23 @@ const InventoryManager: React.FC<{
       return;
     }
 
-    // Deduct ingredients
-    const updatedIngredients = ingredients.map(ing => {
-      const recipeItem = product.recipe.find(r => r.ingredientId === ing.id);
-      if (recipeItem) {
-        return { ...ing, quantity: ing.quantity - (recipeItem.amount * simQty) };
-      }
-      return ing;
+    // Deduct ingredients (FIFO - First In First Out)
+    let tempIngredients = [...ingredients];
+    product.recipe.forEach(r => {
+      const recipeIng = ingredients.find(i => i.id === r.ingredientId);
+      if (!recipeIng) return;
+      
+      let amountToDeduct = r.amount * simQty;
+      
+      // Sort by date if possible, otherwise just use order
+      tempIngredients = tempIngredients.map(ing => {
+        if (ing.name.toLowerCase() === recipeIng.name.toLowerCase() && ing.unit === recipeIng.unit && amountToDeduct > 0) {
+          const deduction = Math.min(ing.quantity, amountToDeduct);
+          amountToDeduct -= deduction;
+          return { ...ing, quantity: ing.quantity - deduction };
+        }
+        return ing;
+      });
     });
 
     // Increase product stock
@@ -689,7 +717,7 @@ const InventoryManager: React.FC<{
       return p;
     });
 
-    setIngredients(updatedIngredients);
+    setIngredients(tempIngredients);
     setProducts(updatedProducts);
     alert(`Produção de ${simQty}x ${product.name} concluída com sucesso!`);
   };
@@ -797,6 +825,23 @@ const InventoryManager: React.FC<{
 
   return (
     <div className="space-y-12">
+      {/* Resumo de Insumos Totais */}
+      <section className="bg-amber-50 p-6 rounded-3xl border border-amber-100 shadow-sm space-y-4">
+        <div className="flex items-center gap-3 text-amber-800">
+          <PieChart size={24} />
+          <h3 className="text-lg font-bold">Resumo de Estoque Total (Insumos)</h3>
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
+          {groupedIngredients.map((group, idx) => (
+            <div key={idx} className="bg-white p-4 rounded-2xl border border-amber-200 shadow-sm">
+              <p className="text-[10px] font-bold text-amber-600 uppercase mb-1">{group.name}</p>
+              <p className="text-xl font-black text-slate-800">{group.total} <span className="text-sm font-normal text-slate-500">{group.unit}</span></p>
+            </div>
+          ))}
+          {groupedIngredients.length === 0 && <p className="col-span-full text-center py-4 text-amber-600/50 italic text-sm">Nenhum insumo para totalizar.</p>}
+        </div>
+      </section>
+
       {/* Insumos */}
       <section className="space-y-6">
         <div className="flex justify-between items-center">
@@ -820,6 +865,11 @@ const InventoryManager: React.FC<{
             <div>
               <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Nome do Insumo</label>
               <input placeholder="Ex: Farinha" className="w-full p-3 border rounded-xl" value={newIng.name || ''} onChange={e => setNewIng({...newIng, name: e.target.value})} />
+              {newIng.name && groupedIngredients.find(g => g.name.toLowerCase() === newIng.name?.toLowerCase()) && (
+                <p className="text-[10px] text-amber-600 font-bold mt-1 animate-pulse">
+                  Total atual em estoque: {groupedIngredients.find(g => g.name.toLowerCase() === newIng.name?.toLowerCase())?.total} {groupedIngredients.find(g => g.name.toLowerCase() === newIng.name?.toLowerCase())?.unit}
+                </p>
+              )}
             </div>
             <div>
               <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Quantidade</label>
@@ -914,8 +964,10 @@ const InventoryManager: React.FC<{
                       id="recipe-ing-select"
                     >
                       <option value="">Selecionar Insumo...</option>
-                      {ingredients.map(ing => (
-                        <option key={ing.id} value={ing.id}>{ing.name} ({ing.unit})</option>
+                      {groupedIngredients.map(group => (
+                        <option key={group.representativeId} value={group.representativeId}>
+                          {group.name} ({group.unit})
+                        </option>
                       ))}
                     </select>
                     <input 
@@ -1084,20 +1136,27 @@ const InventoryManager: React.FC<{
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 {simProdId ? (
                   products.find(p => p.id === simProdId)?.recipe.map(r => {
-                    const ing = ingredients.find(i => i.id === r.ingredientId);
+                    const recipeIng = ingredients.find(i => i.id === r.ingredientId);
+                    if (!recipeIng) return null;
+                    
+                    const totalAvailable = ingredients
+                      .filter(i => i.name.toLowerCase() === recipeIng.name.toLowerCase() && i.unit === recipeIng.unit)
+                      .reduce((acc, i) => acc + i.quantity, 0);
+                      
                     const totalNeeded = r.amount * simQty;
-                    const isShort = ing ? ing.quantity < totalNeeded : false;
+                    const isShort = totalAvailable < totalNeeded;
+                    
                     return (
                       <div key={r.ingredientId} className="flex justify-between items-center bg-slate-800 p-4 rounded-2xl border border-slate-700">
                         <div>
-                          <p className="text-sm font-bold">{ing?.name}</p>
-                          <p className="text-[10px] text-slate-500">Disponível: {ing?.quantity} {ing?.unit}</p>
+                          <p className="text-sm font-bold">{recipeIng.name}</p>
+                          <p className="text-[10px] text-slate-500">Total Disponível: {totalAvailable} {recipeIng.unit}</p>
                         </div>
                         <div className="text-right">
                           <p className={`text-lg font-black ${isShort ? 'text-red-400' : 'text-green-400'}`}>
-                            {totalNeeded} {ing?.unit}
+                            {totalNeeded} {recipeIng.unit}
                           </p>
-                          {isShort && <p className="text-[10px] text-red-400 font-bold uppercase">Falta: {totalNeeded - (ing?.quantity || 0)}</p>}
+                          {isShort && <p className="text-[10px] text-red-400 font-bold uppercase">Falta: {totalNeeded - totalAvailable}</p>}
                         </div>
                       </div>
                     );
