@@ -82,6 +82,15 @@ export interface Sale {
   sellerName: string;
 }
 
+export interface ProductionLog {
+  id: string;
+  productId: string;
+  productName: string;
+  quantity: number;
+  timestamp: string;
+  ingredientsUsed: { ingredientId: string; ingredientName: string; amount: number; unit: string }[];
+}
+
 export interface AppState {
   user: User | null;
   employees: Employee[];
@@ -90,4 +99,5 @@ export interface AppState {
   ingredients: Ingredient[];
   products: Product[];
   sales: Sale[];
+  productionLogs: ProductionLog[];
 }

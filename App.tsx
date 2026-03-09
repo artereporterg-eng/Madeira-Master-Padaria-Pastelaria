@@ -20,11 +20,27 @@ import {
   ChevronUp,
   FileText,
   Image as ImageIcon,
-  Eye
+  Eye,
+  Calendar,
+  BarChart2,
+  Download
 } from 'lucide-react';
 import { 
+  BarChart, 
+  Bar, 
+  XAxis, 
+  YAxis, 
+  CartesianGrid, 
+  Tooltip, 
+  Legend, 
+  ResponsiveContainer,
+  PieChart as RePieChart,
+  Pie,
+  Cell
+} from 'recharts';
+import { 
   User, UserRole, Employee, EmployeeCategory, 
-  SalaryPayment, Expense, Ingredient, Product, Sale, SaleItem 
+  SalaryPayment, Expense, Ingredient, Product, Sale, SaleItem, ProductionLog 
 } from './types';
 import { getBusinessInsights } from './services/geminiService';
 import InvoicePrinter from './src/components/InvoicePrinter';
@@ -35,15 +51,28 @@ const INITIAL_USERS: User[] = [
 ];
 
 const ROLE_PERMISSIONS: Record<UserRole, string[]> = {
-  [UserRole.ADMIN]: ['dashboard', 'sales', 'inventory', 'hr', 'finance', 'settings'],
-  [UserRole.MANAGER]: ['dashboard', 'sales', 'inventory', 'hr', 'finance'],
-  [UserRole.STAFF]: ['dashboard', 'sales'],
+  [UserRole.ADMIN]: [
+    'view:dashboard', 'view:sales', 'view:inventory', 'view:hr', 'view:finance', 'view:settings', 'view:reports',
+    'manage:users', 'manage:employees', 'manage:inventory', 'manage:finance', 'manage:salaries'
+  ],
+  [UserRole.MANAGER]: [
+    'view:dashboard', 'view:sales', 'view:inventory', 'view:hr', 'view:finance', 'view:reports',
+    'manage:employees', 'manage:inventory', 'manage:salaries'
+  ],
+  [UserRole.STAFF]: [
+    'view:dashboard', 'view:sales'
+  ],
 };
 
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [user, setUser] = useState<User | null>(null);
   const [loginData, setLoginData] = useState({ username: '', password: '' });
+
+  const hasPermission = (permission: string) => {
+    if (!user) return false;
+    return ROLE_PERMISSIONS[user.role].includes(permission);
+  };
   
   // App State with LocalStorage Persistence
   const [users, setUsers] = useState<User[]>(() => {
@@ -56,6 +85,7 @@ const App: React.FC = () => {
   const [ingredients, setIngredients] = useState<Ingredient[]>(() => JSON.parse(localStorage.getItem('mm_ingredients') || '[]'));
   const [products, setProducts] = useState<Product[]>(() => JSON.parse(localStorage.getItem('mm_products') || '[]'));
   const [sales, setSales] = useState<Sale[]>(() => JSON.parse(localStorage.getItem('mm_sales') || '[]'));
+  const [productionLogs, setProductionLogs] = useState<ProductionLog[]>(() => JSON.parse(localStorage.getItem('mm_production_logs') || '[]'));
   const [aiInsight, setAiInsight] = useState<string>('');
   const [isAiLoading, setIsAiLoading] = useState(false);
 
@@ -67,7 +97,8 @@ const App: React.FC = () => {
     localStorage.setItem('mm_ingredients', JSON.stringify(ingredients));
     localStorage.setItem('mm_products', JSON.stringify(products));
     localStorage.setItem('mm_sales', JSON.stringify(sales));
-  }, [users, employees, salaryPayments, expenses, ingredients, products, sales]);
+    localStorage.setItem('mm_production_logs', JSON.stringify(productionLogs));
+  }, [users, employees, salaryPayments, expenses, ingredients, products, sales, productionLogs]);
 
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
@@ -75,9 +106,10 @@ const App: React.FC = () => {
     if (foundUser) {
       setUser(foundUser);
       // Reset to first allowed tab
-      const allowed = ROLE_PERMISSIONS[foundUser.role];
-      if (!allowed.includes(activeTab)) {
-        setActiveTab(allowed[0]);
+      const allowed = ROLE_PERMISSIONS[foundUser.role].filter(p => p.startsWith('view:'));
+      const firstTab = allowed[0].split(':')[1];
+      if (!ROLE_PERMISSIONS[foundUser.role].includes(`view:${activeTab}`)) {
+        setActiveTab(firstTab);
       }
     } else {
       alert('Credenciais inválidas.');
@@ -155,12 +187,13 @@ const App: React.FC = () => {
         </div>
         
         <nav className="flex-1 px-4 py-4 space-y-2">
-          {ROLE_PERMISSIONS[user.role].includes('dashboard') && <NavItem icon={<PieChart size={20}/>} label="Dashboard" active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} />}
-          {ROLE_PERMISSIONS[user.role].includes('sales') && <NavItem icon={<ShoppingCart size={20}/>} label="Vendas / POS" active={activeTab === 'sales'} onClick={() => setActiveTab('sales')} />}
-          {ROLE_PERMISSIONS[user.role].includes('inventory') && <NavItem icon={<Package size={20}/>} label="Estoque & Prod" active={activeTab === 'inventory'} onClick={() => setActiveTab('inventory')} />}
-          {ROLE_PERMISSIONS[user.role].includes('hr') && <NavItem icon={<Users size={20}/>} label="RH & Salários" active={activeTab === 'hr'} onClick={() => setActiveTab('hr')} />}
-          {ROLE_PERMISSIONS[user.role].includes('finance') && <NavItem icon={<Wallet size={20}/>} label="Financeiro" active={activeTab === 'finance'} onClick={() => setActiveTab('finance')} />}
-          {ROLE_PERMISSIONS[user.role].includes('settings') && <NavItem icon={<Settings size={20}/>} label="Configurações" active={activeTab === 'settings'} onClick={() => setActiveTab('settings')} />}
+          {hasPermission('view:dashboard') && <NavItem icon={<PieChart size={20}/>} label="Dashboard" active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} />}
+          {hasPermission('view:sales') && <NavItem icon={<ShoppingCart size={20}/>} label="Vendas / POS" active={activeTab === 'sales'} onClick={() => setActiveTab('sales')} />}
+          {hasPermission('view:inventory') && <NavItem icon={<Package size={20}/>} label="Estoque & Prod" active={activeTab === 'inventory'} onClick={() => setActiveTab('inventory')} />}
+          {hasPermission('view:hr') && <NavItem icon={<Users size={20}/>} label="RH & Salários" active={activeTab === 'hr'} onClick={() => setActiveTab('hr')} />}
+          {hasPermission('view:finance') && <NavItem icon={<Wallet size={20}/>} label="Financeiro" active={activeTab === 'finance'} onClick={() => setActiveTab('finance')} />}
+          {hasPermission('view:reports') && <NavItem icon={<FileText size={20}/>} label="Relatórios" active={activeTab === 'reports'} onClick={() => setActiveTab('reports')} />}
+          {hasPermission('view:settings') && <NavItem icon={<Settings size={20}/>} label="Configurações" active={activeTab === 'settings'} onClick={() => setActiveTab('settings')} />}
         </nav>
 
         <div className="p-4 border-t border-slate-100">
@@ -186,7 +219,7 @@ const App: React.FC = () => {
       <main className="flex-1 ml-64 p-8 overflow-auto">
         <header className="flex justify-between items-center mb-8 no-print">
           <div>
-            <h2 className="text-2xl font-bold text-slate-800 capitalize">{activeTab.replace('inventory', 'Estoque').replace('hr', 'Recursos Humanos').replace('finance', 'Financeiro').replace('settings', 'Configurações')}</h2>
+            <h2 className="text-2xl font-bold text-slate-800 capitalize">{activeTab.replace('inventory', 'Estoque').replace('hr', 'Recursos Humanos').replace('finance', 'Financeiro').replace('settings', 'Configurações').replace('reports', 'Relatórios Periódicos')}</h2>
             <p className="text-slate-500 text-sm">Bem-vindo à gestão centralizada da sua padaria.</p>
           </div>
           <div className="text-right">
@@ -211,6 +244,7 @@ const App: React.FC = () => {
             setEmployees={setEmployees} 
             salaryPayments={salaryPayments} 
             setSalaryPayments={setSalaryPayments} 
+            hasPermission={hasPermission}
           />
         )}
         {activeTab === 'sales' && (
@@ -222,6 +256,7 @@ const App: React.FC = () => {
             ingredients={ingredients}
             setIngredients={setIngredients}
             currentUser={user}
+            hasPermission={hasPermission}
           />
         )}
         {activeTab === 'inventory' && (
@@ -230,6 +265,9 @@ const App: React.FC = () => {
             setIngredients={setIngredients} 
             products={products} 
             setProducts={setProducts} 
+            productionLogs={productionLogs}
+            setProductionLogs={setProductionLogs}
+            hasPermission={hasPermission}
           />
         )}
         {activeTab === 'finance' && (
@@ -239,6 +277,14 @@ const App: React.FC = () => {
             sales={sales}
             salaryPayments={salaryPayments}
             employees={employees}
+            hasPermission={hasPermission}
+          />
+        )}
+        {activeTab === 'reports' && (
+          <ReportsManager 
+            productionLogs={productionLogs}
+            products={products}
+            ingredients={ingredients}
           />
         )}
         {activeTab === 'settings' && (
@@ -373,11 +419,15 @@ const HRManager: React.FC<{
   employees: Employee[], 
   setEmployees: React.Dispatch<React.SetStateAction<Employee[]>>,
   salaryPayments: SalaryPayment[],
-  setSalaryPayments: React.Dispatch<React.SetStateAction<SalaryPayment[]>>
-}> = ({ employees, setEmployees, salaryPayments, setSalaryPayments }) => {
+  setSalaryPayments: React.Dispatch<React.SetStateAction<SalaryPayment[]>>,
+  hasPermission: (p: string) => boolean
+}> = ({ employees, setEmployees, salaryPayments, setSalaryPayments, hasPermission }) => {
   const [showAdd, setShowAdd] = useState(false);
   const [newEmp, setNewEmp] = useState<Partial<Employee>>({ category: EmployeeCategory.BAKER });
   const [editingEmpId, setEditingEmpId] = useState<string | null>(null);
+
+  const canManage = hasPermission('manage:employees');
+  const canPay = hasPermission('manage:salaries');
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>, field: 'photo' | 'curriculum' | 'idCard') => {
     const file = e.target.files?.[0];
@@ -446,19 +496,21 @@ const HRManager: React.FC<{
     <div className="space-y-6">
       <div className="flex justify-between items-center">
         <h3 className="text-xl font-bold text-slate-800">Gestão de Staff</h3>
-        <button 
-          onClick={() => {
-            if (showAdd && editingEmpId) {
-              setEditingEmpId(null);
-              setNewEmp({ category: EmployeeCategory.BAKER });
-            } else {
-              setShowAdd(!showAdd);
-            }
-          }}
-          className="bg-amber-600 text-white px-6 py-2 rounded-xl flex items-center gap-2 font-bold hover:bg-amber-700 transition-colors"
-        >
-          {showAdd && editingEmpId ? 'Cancelar Edição' : <><Plus size={18}/> Novo Funcionário</>}
-        </button>
+        {canManage && (
+          <button 
+            onClick={() => {
+              if (showAdd && editingEmpId) {
+                setEditingEmpId(null);
+                setNewEmp({ category: EmployeeCategory.BAKER });
+              } else {
+                setShowAdd(!showAdd);
+              }
+            }}
+            className="bg-amber-600 text-white px-6 py-2 rounded-xl flex items-center gap-2 font-bold hover:bg-amber-700 transition-colors"
+          >
+            {showAdd && editingEmpId ? 'Cancelar Edição' : <><Plus size={18}/> Novo Funcionário</>}
+          </button>
+        )}
       </div>
 
       {showAdd && (
@@ -536,22 +588,24 @@ const HRManager: React.FC<{
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {employees.map(emp => (
           <div key={emp.id} className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm relative group">
-            <div className="absolute top-4 right-4 flex gap-2 opacity-0 group-hover:opacity-100 transition-all">
-              <button 
-                onClick={() => startEditEmployee(emp)}
-                className="p-1.5 bg-slate-50 text-slate-400 hover:text-amber-600 rounded-lg"
-                title="Editar Funcionário"
-              >
-                <Settings size={18} />
-              </button>
-              <button 
-                onClick={() => deleteEmployee(emp.id)}
-                className="p-1.5 bg-slate-50 text-slate-400 hover:text-red-500 rounded-lg"
-                title="Excluir Funcionário"
-              >
-                <Trash2 size={18} />
-              </button>
-            </div>
+            {canManage && (
+              <div className="absolute top-4 right-4 flex gap-2 opacity-0 group-hover:opacity-100 transition-all">
+                <button 
+                  onClick={() => startEditEmployee(emp)}
+                  className="p-1.5 bg-slate-50 text-slate-400 hover:text-amber-600 rounded-lg"
+                  title="Editar Funcionário"
+                >
+                  <Settings size={18} />
+                </button>
+                <button 
+                  onClick={() => deleteEmployee(emp.id)}
+                  className="p-1.5 bg-slate-50 text-slate-400 hover:text-red-500 rounded-lg"
+                  title="Excluir Funcionário"
+                >
+                  <Trash2 size={18} />
+                </button>
+              </div>
+            )}
             <div className="flex items-center gap-4 mb-6">
               <div className="w-16 h-16 bg-amber-50 text-amber-600 rounded-2xl flex items-center justify-center overflow-hidden border border-amber-100 shadow-inner">
                 {emp.photo ? (
@@ -600,12 +654,14 @@ const HRManager: React.FC<{
                   <p className="text-[10px] text-slate-400 uppercase font-bold">Salário Mensal</p>
                   <p className="font-bold text-slate-800 text-lg">{emp.salary.toLocaleString()} Kz</p>
                 </div>
-                <button 
-                  onClick={() => paySalary(emp)}
-                  className="bg-amber-600 text-white px-4 py-2 rounded-xl text-xs font-bold hover:bg-amber-700 transition-all shadow-md shadow-amber-100"
-                >
-                  Pagar Agora
-                </button>
+                {canPay && (
+                  <button 
+                    onClick={() => paySalary(emp)}
+                    className="bg-amber-600 text-white px-4 py-2 rounded-xl text-xs font-bold hover:bg-amber-700 transition-all shadow-md shadow-amber-100"
+                  >
+                    Pagar Agora
+                  </button>
+                )}
               </div>
             </div>
           </div>
@@ -620,8 +676,11 @@ const InventoryManager: React.FC<{
   ingredients: Ingredient[],
   setIngredients: React.Dispatch<React.SetStateAction<Ingredient[]>>,
   products: Product[],
-  setProducts: React.Dispatch<React.SetStateAction<Product[]>>
-}> = ({ ingredients, setIngredients, products, setProducts }) => {
+  setProducts: React.Dispatch<React.SetStateAction<Product[]>>,
+  productionLogs: ProductionLog[],
+  setProductionLogs: React.Dispatch<React.SetStateAction<ProductionLog[]>>,
+  hasPermission: (p: string) => boolean
+}> = ({ ingredients, setIngredients, products, setProducts, productionLogs, setProductionLogs, hasPermission }) => {
   const [showAddIng, setShowAddIng] = useState(false);
   const [newIng, setNewIng] = useState<Partial<Ingredient>>({ unit: 'kg' });
   const [showAddProd, setShowAddProd] = useState(false);
@@ -633,6 +692,8 @@ const InventoryManager: React.FC<{
   const [showInitialStock, setShowInitialStock] = useState(false);
   const [initialStockProdId, setInitialStockProdId] = useState<string>('');
   const [initialStockQty, setInitialStockQty] = useState<number>(0);
+
+  const canManage = hasPermission('manage:inventory');
 
   const groupedIngredients = useMemo(() => {
     const groups: Record<string, { name: string, unit: string, total: number, representativeId: string }> = {};
@@ -719,6 +780,26 @@ const InventoryManager: React.FC<{
 
     setIngredients(tempIngredients);
     setProducts(updatedProducts);
+
+    // Record production log
+    const newLog: ProductionLog = {
+      id: Math.random().toString(36).substr(2, 9),
+      productId: simProdId,
+      productName: product.name,
+      quantity: simQty,
+      timestamp: new Date().toISOString(),
+      ingredientsUsed: product.recipe.map(r => {
+        const ing = ingredients.find(i => i.id === r.ingredientId);
+        return {
+          ingredientId: r.ingredientId,
+          ingredientName: ing?.name || 'Insumo Desconhecido',
+          amount: r.amount * simQty,
+          unit: ing?.unit || ''
+        };
+      })
+    };
+    setProductionLogs([...productionLogs, newLog]);
+
     alert(`Produção de ${simQty}x ${product.name} concluída com sucesso!`);
   };
 
@@ -757,6 +838,69 @@ const InventoryManager: React.FC<{
   const saveProduct = () => {
     if (newProd.name && newProd.price) {
       const recipe = newProd.recipe || [];
+      const stockValue = Number(newProd.stock || 0);
+      let tempIngredients = [...ingredients];
+
+      // If it's a NEW product and has stock + recipe, trigger production logic
+      if (!editingProdId && stockValue > 0 && recipe.length > 0) {
+        // Check if enough ingredients (by name)
+        const canProduce = recipe.every(r => {
+          const recipeIng = ingredients.find(i => i.id === r.ingredientId);
+          if (!recipeIng) return false;
+          
+          const totalAvailable = ingredients
+            .filter(i => i.name.toLowerCase() === recipeIng.name.toLowerCase() && i.unit === recipeIng.unit)
+            .reduce((acc, i) => acc + i.quantity, 0);
+            
+          return totalAvailable >= (r.amount * stockValue);
+        });
+
+        if (!canProduce) {
+          alert('Insumos insuficientes para produzir o estoque inicial deste produto!');
+          return;
+        }
+
+        // Deduct ingredients (FIFO)
+        recipe.forEach(r => {
+          const recipeIng = ingredients.find(i => i.id === r.ingredientId);
+          if (!recipeIng) return;
+          
+          let amountToDeduct = r.amount * stockValue;
+          
+          tempIngredients = tempIngredients.map(ing => {
+            if (ing.name.toLowerCase() === recipeIng.name.toLowerCase() && ing.unit === recipeIng.unit && amountToDeduct > 0) {
+              const deduction = Math.min(ing.quantity, amountToDeduct);
+              amountToDeduct -= deduction;
+              return { ...ing, quantity: ing.quantity - deduction };
+            }
+            return ing;
+          });
+        });
+
+        setIngredients(tempIngredients);
+
+        // Record production log for initial stock
+        const newLog: ProductionLog = {
+          id: Math.random().toString(36).substr(2, 9),
+          productId: editingProdId || 'new-product', // Will be updated if possible, but at least we log it
+          productName: newProd.name!,
+          quantity: stockValue,
+          timestamp: new Date().toISOString(),
+          ingredientsUsed: recipe.map(r => {
+            const ing = ingredients.find(i => i.id === r.ingredientId);
+            return {
+              ingredientId: r.ingredientId,
+              ingredientName: ing?.name || 'Insumo Desconhecido',
+              amount: r.amount * stockValue,
+              unit: ing?.unit || ''
+            };
+          })
+        };
+        setProductionLogs(prev => [...prev, newLog]);
+
+        alert(`Produção inicial de ${stockValue}x ${newProd.name} concluída com sucesso!`);
+      }
+
       if (editingProdId) {
         setProducts(products.map(p => p.id === editingProdId ? {
           ...p,
@@ -772,7 +916,7 @@ const InventoryManager: React.FC<{
           id: Math.random().toString(36).substr(2, 9),
           name: newProd.name,
           price: Number(newProd.price),
-          stock: Number(newProd.stock),
+          stock: stockValue,
           image: newProd.image,
           createdAt: new Date().toISOString(),
           recipe: recipe
@@ -846,19 +990,21 @@ const InventoryManager: React.FC<{
       <section className="space-y-6">
         <div className="flex justify-between items-center">
           <h3 className="text-xl font-bold text-slate-800 flex items-center gap-2"><Package size={20}/> Matéria Prima (Insumos)</h3>
-          <button 
-            onClick={() => {
-              if (showAddIng && editingIngId) {
-                setEditingIngId(null);
-                setNewIng({ unit: 'kg' });
-              } else {
-                setShowAddIng(!showAddIng);
-              }
-            }} 
-            className="text-amber-600 bg-white border border-amber-600 px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-50 transition-colors"
-          >
-            {showAddIng && editingIngId ? 'Cancelar Edição' : 'Adicionar Insumo'}
-          </button>
+          {canManage && (
+            <button 
+              onClick={() => {
+                if (showAddIng && editingIngId) {
+                  setEditingIngId(null);
+                  setNewIng({ unit: 'kg' });
+                } else {
+                  setShowAddIng(!showAddIng);
+                }
+              }} 
+              className="text-amber-600 bg-white border border-amber-600 px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-50 transition-colors"
+            >
+              {showAddIng && editingIngId ? 'Cancelar Edição' : 'Adicionar Insumo'}
+            </button>
+          )}
         </div>
         {showAddIng && (
           <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm grid grid-cols-1 md:grid-cols-4 gap-4 items-end animate-in slide-in-from-top-4 duration-300">
@@ -891,13 +1037,15 @@ const InventoryManager: React.FC<{
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           {ingredients.map(ing => (
             <div key={ing.id} className="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm group relative">
-              <button 
-                onClick={() => startEditIngredient(ing)}
-                className="absolute top-4 right-4 p-1.5 bg-slate-50 text-slate-400 hover:text-amber-600 rounded-lg opacity-0 group-hover:opacity-100 transition-all"
-                title="Editar Insumo"
-              >
-                <Settings size={14} />
-              </button>
+              {canManage && (
+                <button 
+                  onClick={() => startEditIngredient(ing)}
+                  className="absolute top-4 right-4 p-1.5 bg-slate-50 text-slate-400 hover:text-amber-600 rounded-lg opacity-0 group-hover:opacity-100 transition-all"
+                  title="Editar Insumo"
+                >
+                  <Settings size={14} />
+                </button>
+              )}
               <h5 className="font-bold text-slate-800 mb-1">{ing.name}</h5>
               <div className="flex justify-between items-center mb-2">
                 <p className="text-lg font-bold text-amber-600">{ing.quantity} {ing.unit}</p>
@@ -915,19 +1063,21 @@ const InventoryManager: React.FC<{
       <section className="space-y-6">
         <div className="flex justify-between items-center">
           <h3 className="text-xl font-bold text-slate-800 flex items-center gap-2"><ChefHat size={20}/> Produtos Prontos</h3>
-          <button 
-            onClick={() => {
-              if (showAddProd && editingProdId) {
-                setEditingProdId(null);
-                setNewProd({ stock: 0 });
-              } else {
-                setShowAddProd(!showAddProd);
-              }
-            }} 
-            className="bg-amber-600 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-700 transition-colors"
-          >
-            {showAddProd && editingProdId ? 'Cancelar Edição' : 'Novo Produto'}
-          </button>
+          {canManage && (
+            <button 
+              onClick={() => {
+                if (showAddProd && editingProdId) {
+                  setEditingProdId(null);
+                  setNewProd({ stock: 0 });
+                } else {
+                  setShowAddProd(!showAddProd);
+                }
+              }} 
+              className="bg-amber-600 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-amber-700 transition-colors"
+            >
+              {showAddProd && editingProdId ? 'Cancelar Edição' : 'Novo Produto'}
+            </button>
+          )}
         </div>
         {showAddProd && (
           <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm space-y-6 animate-in slide-in-from-top-4 duration-300">
@@ -1018,13 +1168,15 @@ const InventoryManager: React.FC<{
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
           {products.map(prod => (
             <div key={prod.id} className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm group relative">
-              <button 
-                onClick={() => startEditProduct(prod)}
-                className="absolute top-4 right-4 p-2 bg-white/80 backdrop-blur-sm text-slate-400 hover:text-amber-600 rounded-full shadow-sm opacity-0 group-hover:opacity-100 transition-all z-10"
-                title="Editar Produto"
-              >
-                <Settings size={16} />
-              </button>
+              {canManage && (
+                <button 
+                  onClick={() => startEditProduct(prod)}
+                  className="absolute top-4 right-4 p-2 bg-white/80 backdrop-blur-sm text-slate-400 hover:text-amber-600 rounded-full shadow-sm opacity-0 group-hover:opacity-100 transition-all z-10"
+                  title="Editar Produto"
+                >
+                  <Settings size={16} />
+                </button>
+              )}
               <div className="aspect-square bg-slate-50 rounded-2xl mb-4 flex items-center justify-center text-slate-300 group-hover:bg-amber-50 group-hover:text-amber-200 transition-colors overflow-hidden">
                 {prod.image ? (
                   <img src={prod.image} alt={prod.name} className="w-full h-full object-cover" />
@@ -1194,8 +1346,9 @@ const SalesPOS: React.FC<{
   setSales: React.Dispatch<React.SetStateAction<Sale[]>>,
   ingredients: Ingredient[],
   setIngredients: React.Dispatch<React.SetStateAction<Ingredient[]>>,
-  currentUser: User
-}> = ({ products, setProducts, sales, setSales, currentUser }) => {
+  currentUser: User,
+  hasPermission: (p: string) => boolean
+}> = ({ products, setProducts, sales, setSales, currentUser, hasPermission }) => {
   const [cart, setCart] = useState<SaleItem[]>([]);
   const [showReceipt, setShowReceipt] = useState<Sale | null>(null);
   const [activeSubTab, setActiveSubTab] = useState<'pos' | 'history'>('pos');
@@ -1429,11 +1582,14 @@ const FinanceManager: React.FC<{
   setExpenses: React.Dispatch<React.SetStateAction<Expense[]>>,
   sales: Sale[],
   salaryPayments: SalaryPayment[],
-  employees: Employee[]
-}> = ({ expenses, setExpenses, sales, salaryPayments, employees }) => {
+  employees: Employee[],
+  hasPermission: (p: string) => boolean
+}> = ({ expenses, setExpenses, sales, salaryPayments, employees, hasPermission }) => {
   const [showAdd, setShowAdd] = useState(false);
   const [newExp, setNewExp] = useState<Partial<Expense>>({});
   const [showFullSalaryHistory, setShowFullSalaryHistory] = useState(false);
+
+  const canManage = hasPermission('manage:finance');
 
   const addExpense = () => {
     if (newExp.description && newExp.amount) {
@@ -1539,12 +1695,14 @@ const FinanceManager: React.FC<{
             </div>
             <h3 className="text-xl font-bold text-slate-800">Registo de Despesas</h3>
           </div>
-          <button 
-            onClick={() => setShowAdd(!showAdd)}
-            className="text-white bg-slate-800 px-6 py-2 rounded-xl text-sm font-bold hover:bg-slate-700 transition-colors"
-          >
-            Nova Despesa
-          </button>
+          {canManage && (
+            <button 
+              onClick={() => setShowAdd(!showAdd)}
+              className="text-white bg-slate-800 px-6 py-2 rounded-xl text-sm font-bold hover:bg-slate-700 transition-colors"
+            >
+              Nova Despesa
+            </button>
+          )}
         </div>
 
         {showAdd && (
@@ -1760,6 +1918,203 @@ const UserManager: React.FC<{
             ))}
           </tbody>
         </table>
+      </div>
+    </div>
+  );
+};
+
+const ReportsManager: React.FC<{
+  productionLogs: ProductionLog[],
+  products: Product[],
+  ingredients: Ingredient[]
+}> = ({ productionLogs, products, ingredients }) => {
+  const [period, setPeriod] = useState<'weekly' | 'monthly' | 'yearly'>('monthly');
+
+  const filteredLogs = useMemo(() => {
+    const now = new Date();
+    return productionLogs.filter(log => {
+      const logDate = new Date(log.timestamp);
+      if (period === 'weekly') {
+        const weekAgo = new Date();
+        weekAgo.setDate(now.getDate() - 7);
+        return logDate >= weekAgo;
+      } else if (period === 'monthly') {
+        return logDate.getMonth() === now.getMonth() && logDate.getFullYear() === now.getFullYear();
+      } else {
+        return logDate.getFullYear() === now.getFullYear();
+      }
+    });
+  }, [productionLogs, period]);
+
+  const productStats = useMemo(() => {
+    const stats: Record<string, { name: string, quantity: number }> = {};
+    filteredLogs.forEach(log => {
+      if (!stats[log.productId]) {
+        stats[log.productId] = { name: log.productName, quantity: 0 };
+      }
+      stats[log.productId].quantity += log.quantity;
+    });
+    return Object.values(stats).sort((a, b) => b.quantity - a.quantity);
+  }, [filteredLogs]);
+
+  const ingredientStats = useMemo(() => {
+    const stats: Record<string, { name: string, amount: number, unit: string }> = {};
+    filteredLogs.forEach(log => {
+      log.ingredientsUsed.forEach(ing => {
+        const key = `${ing.ingredientName.toLowerCase()}-${ing.unit}`;
+        if (!stats[key]) {
+          stats[key] = { name: ing.ingredientName, amount: 0, unit: ing.unit };
+        }
+        stats[key].amount += ing.amount;
+      });
+    });
+    return Object.values(stats).sort((a, b) => b.amount - a.amount);
+  }, [filteredLogs]);
+
+  const chartData = productStats.slice(0, 5);
+
+  return (
+    <div className="space-y-8 animate-in fade-in duration-500">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
+        <div>
+          <h3 className="text-xl font-bold text-slate-800 flex items-center gap-2">
+            <BarChart2 className="text-amber-600" size={24} /> 
+            Relatórios de Produção
+          </h3>
+          <p className="text-slate-500 text-sm">Acompanhe o desempenho e o consumo de insumos.</p>
+        </div>
+        <div className="flex bg-slate-100 p-1 rounded-xl">
+          {(['weekly', 'monthly', 'yearly'] as const).map((p) => (
+            <button
+              key={p}
+              onClick={() => setPeriod(p)}
+              className={`px-4 py-2 rounded-lg text-xs font-bold uppercase transition-all ${
+                period === p 
+                  ? 'bg-white text-amber-600 shadow-sm' 
+                  : 'text-slate-500 hover:text-slate-700'
+              }`}
+            >
+              {p === 'weekly' ? 'Semanal' : p === 'monthly' ? 'Mensal' : 'Anual'}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        {/* Products Chart */}
+        <div className="bg-white p-8 rounded-3xl border border-slate-100 shadow-sm">
+          <h4 className="font-bold text-slate-800 mb-6 flex items-center gap-2">
+            <ChefHat size={18} className="text-amber-600" /> Top 5 Produtos Produzidos
+          </h4>
+          <div className="h-64 w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={chartData}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fontSize: 12, fill: '#64748b'}} />
+                <YAxis axisLine={false} tickLine={false} tick={{fontSize: 12, fill: '#64748b'}} />
+                <Tooltip 
+                  contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
+                  cursor={{ fill: '#f8fafc' }}
+                />
+                <Bar dataKey="quantity" fill="#F59E0B" radius={[4, 4, 0, 0]} barSize={40} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        {/* Summary Cards */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+          <div className="bg-amber-600 p-8 rounded-3xl text-white shadow-lg shadow-amber-100">
+            <div className="bg-white/20 w-12 h-12 rounded-2xl flex items-center justify-center mb-4">
+              <Package size={24} />
+            </div>
+            <p className="text-amber-100 text-xs font-bold uppercase mb-1">Total de Produções</p>
+            <h4 className="text-4xl font-black">{filteredLogs.length}</h4>
+            <p className="text-amber-100 text-[10px] mt-2 italic">No período selecionado</p>
+          </div>
+          <div className="bg-slate-800 p-8 rounded-3xl text-white shadow-lg shadow-slate-100">
+            <div className="bg-white/10 w-12 h-12 rounded-2xl flex items-center justify-center mb-4">
+              <ChefHat size={24} />
+            </div>
+            <p className="text-slate-400 text-xs font-bold uppercase mb-1">Itens Produzidos</p>
+            <h4 className="text-4xl font-black">
+              {productStats.reduce((acc, s) => acc + s.quantity, 0)}
+            </h4>
+            <p className="text-slate-400 text-[10px] mt-2 italic">Unidades totais</p>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        {/* Ingredients Table */}
+        <div className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
+          <div className="p-6 border-b border-slate-50 flex justify-between items-center bg-slate-50/50">
+            <h4 className="font-bold text-slate-800 flex items-center gap-2">
+              <Package size={18} className="text-amber-600" /> Consumo de Insumos
+            </h4>
+            <span className="text-[10px] font-bold text-slate-400 uppercase">{ingredientStats.length} Insumos Usados</span>
+          </div>
+          <div className="overflow-x-auto max-h-[400px]">
+            <table className="w-full">
+              <thead className="sticky top-0 bg-white z-10 shadow-sm">
+                <tr className="text-left text-slate-400 text-[10px] uppercase tracking-wider">
+                  <th className="p-4">Insumo</th>
+                  <th className="p-4 text-right">Qtd Usada</th>
+                </tr>
+              </thead>
+              <tbody className="text-sm divide-y divide-slate-50">
+                {ingredientStats.map((ing, idx) => (
+                  <tr key={idx} className="hover:bg-slate-50 transition-colors">
+                    <td className="p-4 font-medium text-slate-700">{ing.name}</td>
+                    <td className="p-4 text-right font-bold text-amber-600">
+                      {ing.amount.toFixed(2)} {ing.unit}
+                    </td>
+                  </tr>
+                ))}
+                {ingredientStats.length === 0 && (
+                  <tr>
+                    <td colSpan={2} className="p-12 text-center text-slate-400 italic">Nenhum consumo registrado.</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* Products Table */}
+        <div className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
+          <div className="p-6 border-b border-slate-50 flex justify-between items-center bg-slate-50/50">
+            <h4 className="font-bold text-slate-800 flex items-center gap-2">
+              <ChefHat size={18} className="text-amber-600" /> Produtos Fabricados
+            </h4>
+            <span className="text-[10px] font-bold text-slate-400 uppercase">{productStats.length} Tipos de Produtos</span>
+          </div>
+          <div className="overflow-x-auto max-h-[400px]">
+            <table className="w-full">
+              <thead className="sticky top-0 bg-white z-10 shadow-sm">
+                <tr className="text-left text-slate-400 text-[10px] uppercase tracking-wider">
+                  <th className="p-4">Produto</th>
+                  <th className="p-4 text-right">Qtd Produzida</th>
+                </tr>
+              </thead>
+              <tbody className="text-sm divide-y divide-slate-50">
+                {productStats.map((prod, idx) => (
+                  <tr key={idx} className="hover:bg-slate-50 transition-colors">
+                    <td className="p-4 font-medium text-slate-700">{prod.name}</td>
+                    <td className="p-4 text-right font-bold text-slate-800">
+                      {prod.quantity} Unidades
+                    </td>
+                  </tr>
+                ))}
+                {productStats.length === 0 && (
+                  <tr>
+                    <td colSpan={2} className="p-12 text-center text-slate-400 italic">Nenhuma produção registrada.</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
       </div>
     </div>
   );
