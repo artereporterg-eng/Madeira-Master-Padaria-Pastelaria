@@ -19,13 +19,15 @@ const InvoicePrinter: React.FC<InvoicePrinterProps> = ({
   onClose
 }) => {
   const handlePrint = () => {
-    window.print();
+    setTimeout(() => {
+      window.print();
+    }, 100);
   };
 
   return (
     <div className="flex flex-col items-center gap-6 p-4">
       {/* Invoice Area */}
-      <div id="invoice-content" className="invoice-container w-full max-w-[800px] bg-white p-12 border border-slate-100 shadow-sm rounded-sm font-sans text-slate-800">
+      <div id="invoice-content" className="invoice-container w-full max-w-[800px] bg-white p-12 border border-slate-100 shadow-sm rounded-sm font-sans text-slate-800 print:m-0 print:p-[2cm] print:shadow-none print:border-none">
         {/* Header */}
         <div className="flex justify-between items-start border-b border-slate-200 pb-8 mb-8">
           <div>
@@ -124,21 +126,34 @@ const InvoicePrinter: React.FC<InvoicePrinterProps> = ({
 
       <style>{`
         @media print {
+          @page {
+            margin: 0;
+            size: auto;
+          }
+          html, body, #root {
+            height: auto !important;
+            overflow: visible !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            background: white !important;
+          }
           body * {
-            visibility: hidden;
+            visibility: hidden !important;
           }
           #invoice-content, #invoice-content * {
-            visibility: visible;
+            visibility: visible !important;
           }
           #invoice-content {
-            position: absolute;
-            left: 0;
-            top: 0;
-            width: 100%;
-            margin: 0;
-            padding: 20px;
-            border: none;
-            box-shadow: none;
+            position: absolute !important;
+            left: 0 !important;
+            top: 0 !important;
+            width: 100% !important;
+            margin: 0 !important;
+            padding: 2cm !important;
+            border: none !important;
+            box-shadow: none !important;
+            background: white !important;
+            z-index: 99999 !important;
           }
           .no-print {
             display: none !important;
