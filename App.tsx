@@ -735,19 +735,23 @@ const InventoryManager: React.FC<{
     if (!product) return;
 
     // Check if enough ingredients (by name)
-    const canProduce = product.recipe.every(r => {
+    const missingIngredients: string[] = [];
+    product.recipe.forEach(r => {
       const recipeIng = ingredients.find(i => i.id === r.ingredientId);
-      if (!recipeIng) return false;
+      if (!recipeIng) return;
       
       const totalAvailable = ingredients
         .filter(i => i.name.toLowerCase() === recipeIng.name.toLowerCase() && i.unit === recipeIng.unit)
         .reduce((acc, i) => acc + i.quantity, 0);
         
-      return totalAvailable >= (r.amount * simQty);
+      const required = r.amount * simQty;
+      if (totalAvailable < required) {
+        missingIngredients.push(`${recipeIng.name}: Necessário ${required.toFixed(2)} ${recipeIng.unit} | Disponível ${totalAvailable.toFixed(2)} ${recipeIng.unit} | Falta ${(required - totalAvailable).toFixed(2)} ${recipeIng.unit}`);
+      }
     });
 
-    if (!canProduce) {
-      alert('Insumos insuficientes para esta produção!');
+    if (missingIngredients.length > 0) {
+      alert(`Insumos insuficientes para esta produção:\n\n${missingIngredients.join('\n')}`);
       return;
     }
 
@@ -844,19 +848,23 @@ const InventoryManager: React.FC<{
       // If it's a NEW product and has stock + recipe, trigger production logic
       if (!editingProdId && stockValue > 0 && recipe.length > 0) {
         // Check if enough ingredients (by name)
-        const canProduce = recipe.every(r => {
+        const missingIngredients: string[] = [];
+        recipe.forEach(r => {
           const recipeIng = ingredients.find(i => i.id === r.ingredientId);
-          if (!recipeIng) return false;
+          if (!recipeIng) return;
           
           const totalAvailable = ingredients
             .filter(i => i.name.toLowerCase() === recipeIng.name.toLowerCase() && i.unit === recipeIng.unit)
             .reduce((acc, i) => acc + i.quantity, 0);
             
-          return totalAvailable >= (r.amount * stockValue);
+          const required = r.amount * stockValue;
+          if (totalAvailable < required) {
+            missingIngredients.push(`${recipeIng.name}: Necessário ${required.toFixed(2)} ${recipeIng.unit} | Disponível ${totalAvailable.toFixed(2)} ${recipeIng.unit} | Falta ${(required - totalAvailable).toFixed(2)} ${recipeIng.unit}`);
+          }
         });
 
-        if (!canProduce) {
-          alert('Insumos insuficientes para produzir o estoque inicial deste produto!');
+        if (missingIngredients.length > 0) {
+          alert(`Insumos insuficientes para produzir o estoque inicial deste produto:\n\n${missingIngredients.join('\n')}`);
           return;
         }
 
@@ -1353,6 +1361,47 @@ const SalesPOS: React.FC<{
   const [showReceipt, setShowReceipt] = useState<Sale | null>(null);
   const [activeSubTab, setActiveSubTab] = useState<'pos' | 'history'>('pos');
 
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't trigger shortcuts if user is typing in an input
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement) {
+        return;
+      }
+
+      if (activeSubTab === 'pos') {
+        // F9 or Enter to complete sale
+        if ((e.key === 'F9' || e.key === 'Enter') && cart.length > 0) {
+          e.preventDefault();
+          completeSale();
+        }
+
+        // Esc to clear cart or close receipt
+        if (e.key === 'Escape') {
+          if (showReceipt) {
+            setShowReceipt(null);
+          } else if (cart.length > 0) {
+            if (confirm('Deseja limpar o carrinho?')) setCart([]);
+          }
+        }
+
+        // Number keys 1-9 to add products
+        if (/^[1-9]$/.test(e.key)) {
+          const index = parseInt(e.key) - 1;
+          if (products[index]) {
+            addToCart(products[index]);
+          }
+        }
+      }
+
+      // Tab switching shortcuts
+      if (e.key === 'F2') setActiveSubTab('pos');
+      if (e.key === 'F3') setActiveSubTab('history');
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [cart, products, activeSubTab, showReceipt]);
+
   const addToCart = (product: Product) => {
     if (product.stock <= 0) {
       alert('Sem estoque!');
@@ -1402,13 +1451,13 @@ const SalesPOS: React.FC<{
           onClick={() => setActiveSubTab('pos')}
           className={`px-6 py-2 rounded-xl font-bold transition-all ${activeSubTab === 'pos' ? 'bg-amber-600 text-white shadow-md' : 'bg-white text-slate-500 border border-slate-200'}`}
         >
-          Nova Venda (POS)
+          Nova Venda (F2)
         </button>
         <button 
           onClick={() => setActiveSubTab('history')}
           className={`px-6 py-2 rounded-xl font-bold transition-all ${activeSubTab === 'history' ? 'bg-amber-600 text-white shadow-md' : 'bg-white text-slate-500 border border-slate-200'}`}
         >
-          Histórico de Vendas
+          Histórico (F3)
         </button>
       </div>
 
@@ -1417,12 +1466,17 @@ const SalesPOS: React.FC<{
           {/* Product List */}
           <div className="lg:col-span-2 space-y-6 overflow-y-auto pr-2">
             <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-              {products.map(prod => (
+              {products.map((prod, idx) => (
                 <button 
                   key={prod.id} 
                   onClick={() => addToCart(prod)}
-                  className="bg-white p-4 rounded-3xl border border-slate-100 shadow-sm text-left hover:border-amber-500 transition-all hover:-translate-y-1 flex flex-col"
+                  className="bg-white p-4 rounded-3xl border border-slate-100 shadow-sm text-left hover:border-amber-500 transition-all hover:-translate-y-1 flex flex-col relative group"
                 >
+                  {idx < 9 && (
+                    <span className="absolute top-2 left-2 bg-slate-800 text-white text-[10px] w-5 h-5 rounded-full flex items-center justify-center font-bold opacity-0 group-hover:opacity-100 transition-opacity">
+                      {idx + 1}
+                    </span>
+                  )}
                   <div className="aspect-square bg-slate-50 rounded-2xl mb-3 flex items-center justify-center text-slate-300 overflow-hidden">
                     {prod.image ? (
                       <img src={prod.image} alt={prod.name} className="w-full h-full object-cover" />
@@ -1478,9 +1532,10 @@ const SalesPOS: React.FC<{
               <button 
                 onClick={completeSale}
                 disabled={cart.length === 0}
-                className="w-full bg-amber-600 text-white font-bold py-4 rounded-2xl shadow-lg shadow-amber-200 hover:bg-amber-700 transition-all active:scale-95 disabled:opacity-50"
+                className="w-full bg-amber-600 text-white font-bold py-4 rounded-2xl shadow-lg shadow-amber-200 hover:bg-amber-700 transition-all active:scale-95 disabled:opacity-50 flex flex-col items-center"
               >
-                Finalizar Compra
+                <span>Finalizar Compra</span>
+                <span className="text-[10px] opacity-60 font-normal">Atalho: F9 ou Enter</span>
               </button>
             </div>
           </div>
