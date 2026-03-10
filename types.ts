@@ -101,3 +101,10 @@ export interface AppState {
   sales: Sale[];
   productionLogs: ProductionLog[];
 }
+
+export interface CompanyInfo {
+  name: string;
+  nif: string;
+  address: string;
+  contact: string;
+}

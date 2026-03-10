@@ -1,12 +1,15 @@
 import React from 'react';
 import { Printer, X } from 'lucide-react';
 
+import { CompanyInfo } from '../../types';
+
 interface InvoicePrinterProps {
   customerName: string;
   date: string;
   service: string;
   amountKz: number;
   transactionId: string;
+  companyInfo: CompanyInfo;
   onClose?: () => void;
 }
 
@@ -16,6 +19,7 @@ const InvoicePrinter: React.FC<InvoicePrinterProps> = ({
   service,
   amountKz,
   transactionId,
+  companyInfo,
   onClose
 }) => {
   const handlePrint = () => {
@@ -31,12 +35,12 @@ const InvoicePrinter: React.FC<InvoicePrinterProps> = ({
         {/* Header */}
         <div className="flex justify-between items-start border-b border-slate-200 pb-6 mb-6">
           <div>
-            <h1 className="text-xl font-black text-amber-600 uppercase tracking-tighter">Madeira Master</h1>
+            <h1 className="text-xl font-black text-amber-600 uppercase tracking-tighter">{companyInfo.name}</h1>
             <p className="text-[10px] text-slate-500 font-bold uppercase">Padaria & Pastelaria</p>
             <div className="mt-3 text-xs text-slate-500">
-              <p>Rua Principal, Luanda, Angola</p>
-              <p>NIF: 5401234567</p>
-              <p>+244 923 000 000</p>
+              <p>{companyInfo.address}</p>
+              <p>NIF: {companyInfo.nif}</p>
+              <p>{companyInfo.contact}</p>
             </div>
           </div>
           <div className="text-right">
@@ -98,7 +102,7 @@ const InvoicePrinter: React.FC<InvoicePrinterProps> = ({
             Obrigado pela sua preferência!
           </p>
           <p className="text-[9px] text-slate-300 mt-1 uppercase tracking-widest">
-            Madeira Master - Sistema de Gestão
+            {companyInfo.name} - Sistema de Gestão
           </p>
         </div>
       </div>

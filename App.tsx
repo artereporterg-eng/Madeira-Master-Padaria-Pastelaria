@@ -40,7 +40,7 @@ import {
 } from 'recharts';
 import { 
   User, UserRole, Employee, EmployeeCategory, 
-  SalaryPayment, Expense, Ingredient, Product, Sale, SaleItem, ProductionLog 
+  SalaryPayment, Expense, Ingredient, Product, Sale, SaleItem, ProductionLog, CompanyInfo 
 } from './types';
 import { getBusinessInsights } from './services/geminiService';
 import InvoicePrinter from './src/components/InvoicePrinter';
@@ -86,6 +86,15 @@ const App: React.FC = () => {
   const [products, setProducts] = useState<Product[]>(() => JSON.parse(localStorage.getItem('mm_products') || '[]'));
   const [sales, setSales] = useState<Sale[]>(() => JSON.parse(localStorage.getItem('mm_sales') || '[]'));
   const [productionLogs, setProductionLogs] = useState<ProductionLog[]>(() => JSON.parse(localStorage.getItem('mm_production_logs') || '[]'));
+  const [companyInfo, setCompanyInfo] = useState<CompanyInfo>(() => {
+    const saved = localStorage.getItem('mm_company_info');
+    return saved ? JSON.parse(saved) : {
+      name: 'Madeira Master',
+      nif: '5401234567',
+      address: 'Rua Principal, Luanda, Angola',
+      contact: '+244 923 000 000'
+    };
+  });
   const [aiInsight, setAiInsight] = useState<string>('');
   const [isAiLoading, setIsAiLoading] = useState(false);
 
@@ -98,7 +107,8 @@ const App: React.FC = () => {
     localStorage.setItem('mm_products', JSON.stringify(products));
     localStorage.setItem('mm_sales', JSON.stringify(sales));
     localStorage.setItem('mm_production_logs', JSON.stringify(productionLogs));
-  }, [users, employees, salaryPayments, expenses, ingredients, products, sales, productionLogs]);
+    localStorage.setItem('mm_company_info', JSON.stringify(companyInfo));
+  }, [users, employees, salaryPayments, expenses, ingredients, products, sales, productionLogs, companyInfo]);
 
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
@@ -257,6 +267,7 @@ const App: React.FC = () => {
             setIngredients={setIngredients}
             currentUser={user}
             hasPermission={hasPermission}
+            companyInfo={companyInfo}
           />
         )}
         {activeTab === 'inventory' && (
@@ -292,6 +303,8 @@ const App: React.FC = () => {
             users={users}
             setUsers={setUsers}
             currentUser={user}
+            companyInfo={companyInfo}
+            setCompanyInfo={setCompanyInfo}
           />
         )}
       </main>
@@ -1355,8 +1368,9 @@ const SalesPOS: React.FC<{
   ingredients: Ingredient[],
   setIngredients: React.Dispatch<React.SetStateAction<Ingredient[]>>,
   currentUser: User,
-  hasPermission: (p: string) => boolean
-}> = ({ products, setProducts, sales, setSales, currentUser, hasPermission }) => {
+  hasPermission: (p: string) => boolean,
+  companyInfo: CompanyInfo
+}> = ({ products, setProducts, sales, setSales, currentUser, hasPermission, companyInfo }) => {
   const [cart, setCart] = useState<SaleItem[]>([]);
   const [showReceipt, setShowReceipt] = useState<Sale | null>(null);
   const [activeSubTab, setActiveSubTab] = useState<'pos' | 'history'>('pos');
@@ -1622,6 +1636,7 @@ const SalesPOS: React.FC<{
                 service={showReceipt.items.map(i => `${i.quantity}x ${i.productName}`).join(', ')}
                 amountKz={showReceipt.total}
                 transactionId={showReceipt.id}
+                companyInfo={companyInfo}
                 onClose={() => setShowReceipt(null)}
               />
             </div>
@@ -1832,8 +1847,10 @@ const FinanceManager: React.FC<{
 const UserManager: React.FC<{
   users: User[],
   setUsers: React.Dispatch<React.SetStateAction<User[]>>,
-  currentUser: User
-}> = ({ users, setUsers, currentUser }) => {
+  currentUser: User,
+  companyInfo: CompanyInfo,
+  setCompanyInfo: React.Dispatch<React.SetStateAction<CompanyInfo>>
+}> = ({ users, setUsers, currentUser, companyInfo, setCompanyInfo }) => {
   const [showAdd, setShowAdd] = useState(false);
   const [newUser, setNewUser] = useState<Partial<User>>({ role: UserRole.STAFF });
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -1871,109 +1888,164 @@ const UserManager: React.FC<{
   };
 
   return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <h3 className="text-xl font-bold text-slate-800">Gestão de Utilizadores</h3>
-        <button 
-          onClick={() => { setShowAdd(!showAdd); setEditingId(null); setNewUser({ role: UserRole.STAFF }); }}
-          className="bg-slate-800 text-white px-6 py-2 rounded-xl flex items-center gap-2 font-bold hover:bg-slate-700 transition-colors"
-        >
-          <Plus size={18}/> Novo Utilizador
-        </button>
-      </div>
-
-      {showAdd && (
-        <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm grid grid-cols-1 md:grid-cols-4 gap-4 items-end animate-in slide-in-from-top-4 duration-300">
+    <div className="space-y-12">
+      {/* Company Info Section */}
+      <section className="space-y-6">
+        <div className="flex justify-between items-center">
+          <h3 className="text-xl font-bold text-slate-800 flex items-center gap-2">
+            <Settings className="text-amber-600" size={24} />
+            Informações da Empresa (Fatura)
+          </h3>
+        </div>
+        
+        <div className="bg-white p-8 rounded-3xl border border-slate-100 shadow-sm grid grid-cols-1 md:grid-cols-2 gap-6">
           <div>
-            <label className="text-xs font-bold text-slate-500 uppercase mb-2 block">Nome de Utilizador</label>
+            <label className="text-xs font-bold text-slate-500 uppercase mb-2 block">Nome da Empresa</label>
             <input 
-              className="w-full p-3 border rounded-xl"
-              value={newUser.username || ''}
-              onChange={e => setNewUser({...newUser, username: e.target.value})}
+              className="w-full p-4 border border-slate-200 rounded-xl focus:ring-2 focus:ring-amber-500 outline-none"
+              value={companyInfo.name}
+              onChange={e => setCompanyInfo({...companyInfo, name: e.target.value})}
+              placeholder="Ex: Madeira Master"
             />
           </div>
           <div>
-            <label className="text-xs font-bold text-slate-500 uppercase mb-2 block">Senha</label>
+            <label className="text-xs font-bold text-slate-500 uppercase mb-2 block">NIF</label>
             <input 
-              type="password"
-              className="w-full p-3 border rounded-xl"
-              value={newUser.password || ''}
-              onChange={e => setNewUser({...newUser, password: e.target.value})}
+              className="w-full p-4 border border-slate-200 rounded-xl focus:ring-2 focus:ring-amber-500 outline-none"
+              value={companyInfo.nif}
+              onChange={e => setCompanyInfo({...companyInfo, nif: e.target.value})}
+              placeholder="Ex: 5401234567"
             />
           </div>
-          <div>
-            <label className="text-xs font-bold text-slate-500 uppercase mb-2 block">Categoria (Role)</label>
-            <select 
-              className="w-full p-3 border rounded-xl"
-              value={newUser.role}
-              onChange={e => setNewUser({...newUser, role: e.target.value as UserRole})}
-            >
-              {Object.values(UserRole).map(r => <option key={r} value={r}>{r}</option>)}
-            </select>
+          <div className="md:col-span-2">
+            <label className="text-xs font-bold text-slate-500 uppercase mb-2 block">Endereço</label>
+            <input 
+              className="w-full p-4 border border-slate-200 rounded-xl focus:ring-2 focus:ring-amber-500 outline-none"
+              value={companyInfo.address}
+              onChange={e => setCompanyInfo({...companyInfo, address: e.target.value})}
+              placeholder="Ex: Rua Principal, Luanda, Angola"
+            />
           </div>
-          <div className="flex gap-2">
-            <button onClick={saveUser} className="flex-1 bg-green-600 text-white p-3 rounded-xl font-bold">
-              {editingId ? 'Atualizar' : 'Salvar'}
-            </button>
-            {editingId && (
-              <button onClick={() => { setShowAdd(false); setEditingId(null); }} className="bg-slate-200 text-slate-600 p-3 rounded-xl font-bold">
-                Cancelar
-              </button>
-            )}
+          <div className="md:col-span-2">
+            <label className="text-xs font-bold text-slate-500 uppercase mb-2 block">Contacto</label>
+            <input 
+              className="w-full p-4 border border-slate-200 rounded-xl focus:ring-2 focus:ring-amber-500 outline-none"
+              value={companyInfo.contact}
+              onChange={e => setCompanyInfo({...companyInfo, contact: e.target.value})}
+              placeholder="Ex: +244 923 000 000"
+            />
           </div>
         </div>
-      )}
+      </section>
 
-      <div className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
-        <table className="w-full">
-          <thead>
-            <tr className="text-left text-slate-400 text-xs uppercase tracking-wider">
-              <th className="p-6">Utilizador</th>
-              <th className="p-6">Categoria</th>
-              <th className="p-6 text-center">Ações</th>
-            </tr>
-          </thead>
-          <tbody className="text-sm divide-y divide-slate-50">
-            {users.map(u => (
-              <tr key={u.id} className="hover:bg-slate-50/50 transition-colors">
-                <td className="p-6">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 bg-slate-100 text-slate-500 rounded-full flex items-center justify-center font-bold">
-                      {u.username.charAt(0).toUpperCase()}
-                    </div>
-                    <span className="font-bold text-slate-800">{u.username}</span>
-                  </div>
-                </td>
-                <td className="p-6">
-                  <span className={`px-2 py-1 rounded-md text-[10px] font-bold uppercase ${
-                    u.role === UserRole.ADMIN ? 'bg-purple-100 text-purple-600' :
-                    u.role === UserRole.MANAGER ? 'bg-blue-100 text-blue-600' :
-                    'bg-slate-100 text-slate-600'
-                  }`}>
-                    {u.role}
-                  </span>
-                </td>
-                <td className="p-6">
-                  <div className="flex justify-center gap-2">
-                    <button 
-                      onClick={() => startEdit(u)}
-                      className="p-2 text-slate-400 hover:text-amber-600 transition-colors"
-                    >
-                      <Settings size={18} />
-                    </button>
-                    <button 
-                      onClick={() => deleteUser(u.id)}
-                      className="p-2 text-slate-400 hover:text-red-600 transition-colors"
-                    >
-                      <Trash2 size={18} />
-                    </button>
-                  </div>
-                </td>
+      {/* User Management Section */}
+      <section className="space-y-6">
+        <div className="flex justify-between items-center">
+          <h3 className="text-xl font-bold text-slate-800 flex items-center gap-2">
+            <Users className="text-amber-600" size={24} />
+            Gestão de Utilizadores
+          </h3>
+          <button 
+            onClick={() => { setShowAdd(!showAdd); setEditingId(null); setNewUser({ role: UserRole.STAFF }); }}
+            className="bg-slate-800 text-white px-6 py-2 rounded-xl flex items-center gap-2 font-bold hover:bg-slate-700 transition-colors"
+          >
+            <Plus size={18}/> Novo Utilizador
+          </button>
+        </div>
+
+        {showAdd && (
+          <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm grid grid-cols-1 md:grid-cols-4 gap-4 items-end animate-in slide-in-from-top-4 duration-300">
+            <div>
+              <label className="text-xs font-bold text-slate-500 uppercase mb-2 block">Nome de Utilizador</label>
+              <input 
+                className="w-full p-3 border rounded-xl"
+                value={newUser.username || ''}
+                onChange={e => setNewUser({...newUser, username: e.target.value})}
+              />
+            </div>
+            <div>
+              <label className="text-xs font-bold text-slate-500 uppercase mb-2 block">Senha</label>
+              <input 
+                type="password"
+                className="w-full p-3 border rounded-xl"
+                value={newUser.password || ''}
+                onChange={e => setNewUser({...newUser, password: e.target.value})}
+              />
+            </div>
+            <div>
+              <label className="text-xs font-bold text-slate-500 uppercase mb-2 block">Categoria (Role)</label>
+              <select 
+                className="w-full p-3 border rounded-xl"
+                value={newUser.role}
+                onChange={e => setNewUser({...newUser, role: e.target.value as UserRole})}
+              >
+                {Object.values(UserRole).map(r => <option key={r} value={r}>{r}</option>)}
+              </select>
+            </div>
+            <div className="flex gap-2">
+              <button onClick={saveUser} className="flex-1 bg-green-600 text-white p-3 rounded-xl font-bold">
+                {editingId ? 'Atualizar' : 'Salvar'}
+              </button>
+              {editingId && (
+                <button onClick={() => { setShowAdd(false); setEditingId(null); }} className="bg-slate-200 text-slate-600 p-3 rounded-xl font-bold">
+                  Cancelar
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
+        <div className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
+          <table className="w-full">
+            <thead>
+              <tr className="text-left text-slate-400 text-xs uppercase tracking-wider">
+                <th className="p-6">Utilizador</th>
+                <th className="p-6">Categoria</th>
+                <th className="p-6 text-center">Ações</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody className="text-sm divide-y divide-slate-50">
+              {users.map(u => (
+                <tr key={u.id} className="hover:bg-slate-50/50 transition-colors">
+                  <td className="p-6">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 bg-slate-100 text-slate-500 rounded-full flex items-center justify-center font-bold">
+                        {u.username.charAt(0).toUpperCase()}
+                      </div>
+                      <span className="font-bold text-slate-800">{u.username}</span>
+                    </div>
+                  </td>
+                  <td className="p-6">
+                    <span className={`px-2 py-1 rounded-md text-[10px] font-bold uppercase ${
+                      u.role === UserRole.ADMIN ? 'bg-purple-100 text-purple-600' :
+                      u.role === UserRole.MANAGER ? 'bg-blue-100 text-blue-600' :
+                      'bg-slate-100 text-slate-600'
+                    }`}>
+                      {u.role}
+                    </span>
+                  </td>
+                  <td className="p-6">
+                    <div className="flex justify-center gap-2">
+                      <button 
+                        onClick={() => startEdit(u)}
+                        className="p-2 text-slate-400 hover:text-amber-600 transition-colors"
+                      >
+                        <Settings size={18} />
+                      </button>
+                      <button 
+                        onClick={() => deleteUser(u.id)}
+                        className="p-2 text-slate-400 hover:text-red-600 transition-colors"
+                      >
+                        <Trash2 size={18} />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
     </div>
   );
 };
