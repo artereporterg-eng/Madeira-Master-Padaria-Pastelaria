@@ -440,13 +440,31 @@ const HRManager: React.FC<{
   const [showAdd, setShowAdd] = useState(false);
   const [newEmp, setNewEmp] = useState<Partial<Employee>>({ category: EmployeeCategory.BAKER, paymentMethod: 'Mão' });
   const [editingEmpId, setEditingEmpId] = useState<string | null>(null);
+  const [errors, setErrors] = useState<Record<string, string>>({});
 
   const canManage = hasPermission('manage:employees');
   const canPay = hasPermission('manage:salaries');
 
+  const validateEmployee = () => {
+    const newErrors: Record<string, string> = {};
+    if (!newEmp.name || newEmp.name.trim().length < 3) newErrors.name = 'Nome deve ter pelo menos 3 caracteres';
+    if (!newEmp.salary || Number(newEmp.salary) <= 0) newErrors.salary = 'Salário deve ser maior que zero';
+    
+    if (newEmp.paymentMethod === 'Transferência') {
+      if (!newEmp.iban || !newEmp.iban.startsWith('AO06')) newErrors.iban = 'IBAN inválido (deve começar com AO06)';
+    }
+    
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
+
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>, field: 'photo' | 'curriculum' | 'idCard' | 'signedReceipt') => {
     const file = e.target.files?.[0];
     if (file) {
+      if (file.size > 2 * 1024 * 1024) { // 2MB limit
+        alert('Ficheiro muito grande. O limite é 2MB.');
+        return;
+      }
       const reader = new FileReader();
       reader.onloadend = () => {
         setNewEmp(prev => ({ ...prev, [field]: reader.result as string }));
@@ -456,7 +474,7 @@ const HRManager: React.FC<{
   };
 
   const saveEmployee = () => {
-    if (newEmp.name && newEmp.salary) {
+    if (validateEmployee()) {
       if (editingEmpId) {
         setEmployees(employees.map(emp => emp.id === editingEmpId ? {
           ...emp,
@@ -488,6 +506,7 @@ const HRManager: React.FC<{
       }
       setShowAdd(false);
       setNewEmp({ category: EmployeeCategory.BAKER, paymentMethod: 'Mão' });
+      setErrors({});
     }
   };
 
@@ -540,16 +559,20 @@ const HRManager: React.FC<{
             <div>
               <label className="text-xs font-bold text-slate-500 uppercase mb-2 block">Nome Completo</label>
               <input 
-                className="w-full p-3 border rounded-xl focus:ring-2 focus:ring-amber-500 outline-none"
+                className={`w-full p-3 border rounded-xl focus:ring-2 focus:ring-amber-500 outline-none ${errors.name ? 'border-red-500 bg-red-50' : 'border-slate-200'}`}
                 value={newEmp.name || ''}
-                onChange={e => setNewEmp({...newEmp, name: e.target.value})}
+                onChange={e => {
+                  setNewEmp({...newEmp, name: e.target.value});
+                  if (errors.name) setErrors({...errors, name: ''});
+                }}
                 placeholder="Ex: João Silva"
               />
+              {errors.name && <p className="text-[10px] text-red-500 mt-1 font-bold">{errors.name}</p>}
             </div>
             <div>
               <label className="text-xs font-bold text-slate-500 uppercase mb-2 block">Categoria</label>
               <select 
-                className="w-full p-3 border rounded-xl focus:ring-2 focus:ring-amber-500 outline-none"
+                className="w-full p-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-amber-500 outline-none"
                 value={newEmp.category}
                 onChange={e => setNewEmp({...newEmp, category: e.target.value as EmployeeCategory})}
               >
@@ -560,11 +583,15 @@ const HRManager: React.FC<{
               <label className="text-xs font-bold text-slate-500 uppercase mb-2 block">Salário (Kz)</label>
               <input 
                 type="number"
-                className="w-full p-3 border rounded-xl focus:ring-2 focus:ring-amber-500 outline-none"
+                className={`w-full p-3 border rounded-xl focus:ring-2 focus:ring-amber-500 outline-none ${errors.salary ? 'border-red-500 bg-red-50' : 'border-slate-200'}`}
                 value={newEmp.salary || ''}
-                onChange={e => setNewEmp({...newEmp, salary: e.target.value})}
+                onChange={e => {
+                  setNewEmp({...newEmp, salary: e.target.value});
+                  if (errors.salary) setErrors({...errors, salary: ''});
+                }}
                 placeholder="0"
               />
+              {errors.salary && <p className="text-[10px] text-red-500 mt-1 font-bold">{errors.salary}</p>}
             </div>
           </div>
 
@@ -572,7 +599,7 @@ const HRManager: React.FC<{
             <div>
               <label className="text-xs font-bold text-slate-500 uppercase mb-2 block">Forma de Pagamento</label>
               <select 
-                className="w-full p-3 border rounded-xl focus:ring-2 focus:ring-amber-500 outline-none"
+                className="w-full p-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-amber-500 outline-none"
                 value={newEmp.paymentMethod || 'Mão'}
                 onChange={e => setNewEmp({...newEmp, paymentMethod: e.target.value as 'Mão' | 'Transferência'})}
               >
@@ -584,11 +611,15 @@ const HRManager: React.FC<{
               <div className="md:col-span-2">
                 <label className="text-xs font-bold text-slate-500 uppercase mb-2 block">IBAN do Funcionário</label>
                 <input 
-                  className="w-full p-3 border rounded-xl focus:ring-2 focus:ring-amber-500 outline-none"
+                  className={`w-full p-3 border rounded-xl focus:ring-2 focus:ring-amber-500 outline-none ${errors.iban ? 'border-red-500 bg-red-50' : 'border-slate-200'}`}
                   value={newEmp.iban || ''}
-                  onChange={e => setNewEmp({...newEmp, iban: e.target.value})}
+                  onChange={e => {
+                    setNewEmp({...newEmp, iban: e.target.value.toUpperCase()});
+                    if (errors.iban) setErrors({...errors, iban: ''});
+                  }}
                   placeholder="AO06 0000 0000 0000 0000 0"
                 />
+                {errors.iban && <p className="text-[10px] text-red-500 mt-1 font-bold">{errors.iban}</p>}
               </div>
             ) : (
               <div className="md:col-span-2">
@@ -761,6 +792,7 @@ const InventoryManager: React.FC<{
   const [newProd, setNewProd] = useState<Partial<Product>>({ stock: 0 });
   const [editingProdId, setEditingProdId] = useState<string | null>(null);
   const [editingIngId, setEditingIngId] = useState<string | null>(null);
+  const [errors, setErrors] = useState<Record<string, string>>({});
   const [simProdId, setSimProdId] = useState<string>('');
   const [simQty, setSimQty] = useState<number>(1);
   const [showInitialStock, setShowInitialStock] = useState(false);
@@ -881,8 +913,18 @@ const InventoryManager: React.FC<{
     alert(`Produção de ${simQty}x ${product.name} concluída com sucesso!`);
   };
 
+  const validateIngredient = () => {
+    const newErrors: Record<string, string> = {};
+    if (!newIng.name || newIng.name.trim().length < 2) newErrors.ingName = 'Nome obrigatório (min 2 carac.)';
+    if (newIng.quantity === undefined || Number(newIng.quantity) < 0) newErrors.ingQty = 'Quantidade inválida';
+    if (newIng.costPerUnit !== undefined && Number(newIng.costPerUnit) < 0) newErrors.ingCost = 'Custo inválido';
+    
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
+
   const saveIngredient = () => {
-    if (newIng.name && newIng.quantity) {
+    if (validateIngredient()) {
       if (editingIngId) {
         setIngredients(ingredients.map(ing => ing.id === editingIngId ? {
           ...ing,
@@ -904,6 +946,7 @@ const InventoryManager: React.FC<{
       }
       setShowAddIng(false);
       setNewIng({ unit: 'kg' });
+      setErrors({});
     }
   };
 
@@ -913,8 +956,18 @@ const InventoryManager: React.FC<{
     setShowAddIng(true);
   };
 
+  const validateProduct = () => {
+    const newErrors: Record<string, string> = {};
+    if (!newProd.name || newProd.name.trim().length < 2) newErrors.prodName = 'Nome obrigatório (min 2 carac.)';
+    if (!newProd.price || Number(newProd.price) <= 0) newErrors.prodPrice = 'Preço deve ser maior que zero';
+    if (newProd.stock !== undefined && Number(newProd.stock) < 0) newErrors.prodStock = 'Estoque inválido';
+    
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
+
   const saveProduct = () => {
-    if (newProd.name && newProd.price) {
+    if (validateProduct()) {
       const recipe = newProd.recipe || [];
       const stockValue = Number(newProd.stock || 0);
       let tempIngredients = [...ingredients];
@@ -1006,6 +1059,7 @@ const InventoryManager: React.FC<{
       }
       setShowAddProd(false);
       setNewProd({ stock: 0, recipe: [] });
+      setErrors({});
     }
   };
 
@@ -1092,7 +1146,16 @@ const InventoryManager: React.FC<{
           <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm grid grid-cols-1 md:grid-cols-4 gap-4 items-end animate-in slide-in-from-top-4 duration-300">
             <div>
               <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Nome do Insumo</label>
-              <input placeholder="Ex: Farinha" className="w-full p-3 border rounded-xl" value={newIng.name || ''} onChange={e => setNewIng({...newIng, name: e.target.value})} />
+              <input 
+                placeholder="Ex: Farinha" 
+                className={`w-full p-3 border rounded-xl focus:ring-2 focus:ring-amber-500 outline-none ${errors.ingName ? 'border-red-500 bg-red-50' : 'border-slate-200'}`}
+                value={newIng.name || ''} 
+                onChange={e => {
+                  setNewIng({...newIng, name: e.target.value});
+                  if (errors.ingName) setErrors({...errors, ingName: ''});
+                }} 
+              />
+              {errors.ingName && <p className="text-[10px] text-red-500 mt-1 font-bold">{errors.ingName}</p>}
               {newIng.name && groupedIngredients.find(g => g.name.toLowerCase() === newIng.name?.toLowerCase()) && (
                 <p className="text-[10px] text-amber-600 font-bold mt-1 animate-pulse">
                   Total atual em estoque: {groupedIngredients.find(g => g.name.toLowerCase() === newIng.name?.toLowerCase())?.total} {groupedIngredients.find(g => g.name.toLowerCase() === newIng.name?.toLowerCase())?.unit}
@@ -1101,7 +1164,17 @@ const InventoryManager: React.FC<{
             </div>
             <div>
               <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Quantidade</label>
-              <input placeholder="Qtd" type="number" className="w-full p-3 border rounded-xl" value={newIng.quantity || ''} onChange={e => setNewIng({...newIng, quantity: e.target.value})} />
+              <input 
+                placeholder="Qtd" 
+                type="number" 
+                className={`w-full p-3 border rounded-xl focus:ring-2 focus:ring-amber-500 outline-none ${errors.ingQty ? 'border-red-500 bg-red-50' : 'border-slate-200'}`}
+                value={newIng.quantity || ''} 
+                onChange={e => {
+                  setNewIng({...newIng, quantity: e.target.value});
+                  if (errors.ingQty) setErrors({...errors, ingQty: ''});
+                }} 
+              />
+              {errors.ingQty && <p className="text-[10px] text-red-500 mt-1 font-bold">{errors.ingQty}</p>}
             </div>
             <div>
               <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Unidade</label>
@@ -1166,15 +1239,44 @@ const InventoryManager: React.FC<{
             <div className="grid grid-cols-1 md:grid-cols-5 gap-4 items-end">
               <div>
                 <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Nome do Produto</label>
-                <input placeholder="Ex: Pão Francês" className="w-full p-3 border rounded-xl" value={newProd.name || ''} onChange={e => setNewProd({...newProd, name: e.target.value})} />
+                <input 
+                  placeholder="Ex: Pão Francês" 
+                  className={`w-full p-3 border rounded-xl focus:ring-2 focus:ring-amber-500 outline-none ${errors.prodName ? 'border-red-500 bg-red-50' : 'border-slate-200'}`}
+                  value={newProd.name || ''} 
+                  onChange={e => {
+                    setNewProd({...newProd, name: e.target.value});
+                    if (errors.prodName) setErrors({...errors, prodName: ''});
+                  }} 
+                />
+                {errors.prodName && <p className="text-[10px] text-red-500 mt-1 font-bold">{errors.prodName}</p>}
               </div>
               <div>
                 <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Preço (Kz)</label>
-                <input placeholder="Preço" type="number" className="w-full p-3 border rounded-xl" value={newProd.price || ''} onChange={e => setNewProd({...newProd, price: e.target.value})} />
+                <input 
+                  placeholder="Preço" 
+                  type="number" 
+                  className={`w-full p-3 border rounded-xl focus:ring-2 focus:ring-amber-500 outline-none ${errors.prodPrice ? 'border-red-500 bg-red-50' : 'border-slate-200'}`}
+                  value={newProd.price || ''} 
+                  onChange={e => {
+                    setNewProd({...newProd, price: e.target.value});
+                    if (errors.prodPrice) setErrors({...errors, prodPrice: ''});
+                  }} 
+                />
+                {errors.prodPrice && <p className="text-[10px] text-red-500 mt-1 font-bold">{errors.prodPrice}</p>}
               </div>
               <div>
                 <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Estoque</label>
-                <input placeholder="Estoque" type="number" className="w-full p-3 border rounded-xl" value={newProd.stock ?? ''} onChange={e => setNewProd({...newProd, stock: e.target.value})} />
+                <input 
+                  placeholder="Estoque" 
+                  type="number" 
+                  className={`w-full p-3 border rounded-xl focus:ring-2 focus:ring-amber-500 outline-none ${errors.prodStock ? 'border-red-500 bg-red-50' : 'border-slate-200'}`}
+                  value={newProd.stock ?? ''} 
+                  onChange={e => {
+                    setNewProd({...newProd, stock: e.target.value});
+                    if (errors.prodStock) setErrors({...errors, prodStock: ''});
+                  }} 
+                />
+                {errors.prodStock && <p className="text-[10px] text-red-500 mt-1 font-bold">{errors.prodStock}</p>}
               </div>
               <div>
                 <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Imagem</label>
@@ -1495,7 +1597,10 @@ const SalesPOS: React.FC<{
   };
 
   const completeSale = () => {
-    if (cart.length === 0) return;
+    if (cart.length === 0) {
+      alert('O carrinho está vazio!');
+      return;
+    }
     
     const total = cart.reduce((acc, item) => acc + (item.price * item.quantity), 0);
     const newSale: Sale = {
@@ -1719,19 +1824,31 @@ const FinanceManager: React.FC<{
   const [showAdd, setShowAdd] = useState(false);
   const [newExp, setNewExp] = useState<Partial<Expense>>({});
   const [showFullSalaryHistory, setShowFullSalaryHistory] = useState(false);
+  const [errors, setErrors] = useState<Record<string, string>>({});
 
   const canManage = hasPermission('manage:finance');
 
+  const validateExpense = () => {
+    const newErrors: Record<string, string> = {};
+    if (!newExp.description || newExp.description.trim().length < 3) newErrors.description = 'Descrição obrigatória (min 3 carac.)';
+    if (!newExp.amount || Number(newExp.amount) <= 0) newErrors.amount = 'Valor deve ser maior que zero';
+    
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
+
   const addExpense = () => {
-    if (newExp.description && newExp.amount) {
+    if (validateExpense()) {
       setExpenses([...expenses, {
         id: Math.random().toString(36).substr(2, 9),
-        description: newExp.description,
+        description: newExp.description!,
         amount: Number(newExp.amount),
         category: newExp.category || 'Outros',
         date: new Date().toISOString()
       }]);
       setShowAdd(false);
+      setNewExp({});
+      setErrors({});
     }
   };
 
@@ -1836,27 +1953,40 @@ const FinanceManager: React.FC<{
           )}
         </div>
 
-        {showAdd && (
+          {showAdd && (
           <div className="mb-8 p-6 bg-slate-50 rounded-2xl grid grid-cols-1 md:grid-cols-4 gap-4 items-end animate-in slide-in-from-top-4 duration-300">
             <div>
               <label className="text-xs font-bold text-slate-500 uppercase mb-2 block">Descrição</label>
               <input 
-                className="w-full p-3 border rounded-xl"
-                onChange={e => setNewExp({...newExp, description: e.target.value})}
+                className={`w-full p-3 border rounded-xl focus:ring-2 focus:ring-slate-800 outline-none ${errors.description ? 'border-red-500 bg-red-50' : 'border-slate-200'}`}
+                value={newExp.description || ''}
+                onChange={e => {
+                  setNewExp({...newExp, description: e.target.value});
+                  if (errors.description) setErrors({...errors, description: ''});
+                }}
+                placeholder="Ex: Compra de Lenha"
               />
+              {errors.description && <p className="text-[10px] text-red-500 mt-1 font-bold">{errors.description}</p>}
             </div>
             <div>
               <label className="text-xs font-bold text-slate-500 uppercase mb-2 block">Valor (Kz)</label>
               <input 
                 type="number"
-                className="w-full p-3 border rounded-xl"
-                onChange={e => setNewExp({...newExp, amount: e.target.value})}
+                className={`w-full p-3 border rounded-xl focus:ring-2 focus:ring-slate-800 outline-none ${errors.amount ? 'border-red-500 bg-red-50' : 'border-slate-200'}`}
+                value={newExp.amount || ''}
+                onChange={e => {
+                  setNewExp({...newExp, amount: e.target.value});
+                  if (errors.amount) setErrors({...errors, amount: ''});
+                }}
+                placeholder="0"
               />
+              {errors.amount && <p className="text-[10px] text-red-500 mt-1 font-bold">{errors.amount}</p>}
             </div>
             <div>
               <label className="text-xs font-bold text-slate-500 uppercase mb-2 block">Categoria</label>
               <select 
-                className="w-full p-3 border rounded-xl"
+                className="w-full p-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-slate-800 outline-none"
+                value={newExp.category || 'Outros'}
                 onChange={e => setNewExp({...newExp, category: e.target.value})}
               >
                 <option value="Suprimentos">Suprimentos</option>
@@ -1867,7 +1997,7 @@ const FinanceManager: React.FC<{
                 <option value="Outros">Outros</option>
               </select>
             </div>
-            <button onClick={addExpense} className="bg-slate-800 text-white p-3 rounded-xl font-bold">Adicionar</button>
+            <button onClick={addExpense} className="bg-slate-800 text-white p-3 rounded-xl font-bold hover:bg-slate-900 transition-colors">Adicionar</button>
           </div>
         )}
 
@@ -1915,9 +2045,19 @@ const UserManager: React.FC<{
   const [showAdd, setShowAdd] = useState(false);
   const [newUser, setNewUser] = useState<Partial<User>>({ role: UserRole.STAFF });
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [errors, setErrors] = useState<Record<string, string>>({});
+
+  const validateUser = () => {
+    const newErrors: Record<string, string> = {};
+    if (!newUser.username || newUser.username.trim().length < 3) newErrors.username = 'Utilizador deve ter pelo menos 3 caracteres';
+    if (!newUser.password || newUser.password.length < 3) newErrors.password = 'Senha deve ter pelo menos 3 caracteres';
+    
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
 
   const saveUser = () => {
-    if (newUser.username && newUser.password) {
+    if (validateUser()) {
       if (editingId) {
         setUsers(users.map(u => u.id === editingId ? { ...u, ...newUser } as User : u));
         setEditingId(null);
@@ -1931,6 +2071,7 @@ const UserManager: React.FC<{
       }
       setShowAdd(false);
       setNewUser({ role: UserRole.STAFF });
+      setErrors({});
     }
   };
 
@@ -2019,19 +2160,29 @@ const UserManager: React.FC<{
             <div>
               <label className="text-xs font-bold text-slate-500 uppercase mb-2 block">Nome de Utilizador</label>
               <input 
-                className="w-full p-3 border rounded-xl"
+                className={`w-full p-3 border rounded-xl focus:ring-2 focus:ring-amber-500 outline-none ${errors.username ? 'border-red-500 bg-red-50' : 'border-slate-200'}`}
                 value={newUser.username || ''}
-                onChange={e => setNewUser({...newUser, username: e.target.value})}
+                onChange={e => {
+                  setNewUser({...newUser, username: e.target.value});
+                  if (errors.username) setErrors({...errors, username: ''});
+                }}
+                placeholder="Ex: joao.silva"
               />
+              {errors.username && <p className="text-[10px] text-red-500 mt-1 font-bold">{errors.username}</p>}
             </div>
             <div>
               <label className="text-xs font-bold text-slate-500 uppercase mb-2 block">Senha</label>
               <input 
                 type="password"
-                className="w-full p-3 border rounded-xl"
+                className={`w-full p-3 border rounded-xl focus:ring-2 focus:ring-amber-500 outline-none ${errors.password ? 'border-red-500 bg-red-50' : 'border-slate-200'}`}
                 value={newUser.password || ''}
-                onChange={e => setNewUser({...newUser, password: e.target.value})}
+                onChange={e => {
+                  setNewUser({...newUser, password: e.target.value});
+                  if (errors.password) setErrors({...errors, password: ''});
+                }}
+                placeholder="••••••"
               />
+              {errors.password && <p className="text-[10px] text-red-500 mt-1 font-bold">{errors.password}</p>}
             </div>
             <div>
               <label className="text-xs font-bold text-slate-500 uppercase mb-2 block">Categoria (Role)</label>
