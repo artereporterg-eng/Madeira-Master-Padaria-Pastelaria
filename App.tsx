@@ -1639,6 +1639,14 @@ const SalesPOS: React.FC<{
         >
           Histórico (F3)
         </button>
+        <button 
+          onClick={() => sales.length > 0 && setShowReceipt(sales[sales.length - 1])}
+          disabled={sales.length === 0}
+          className="px-6 py-2 rounded-xl font-bold transition-all bg-white text-slate-500 border border-slate-200 hover:bg-slate-50 disabled:opacity-50 flex items-center gap-2 ml-auto"
+        >
+          <Printer size={18} />
+          Reimprimir Última Venda
+        </button>
       </div>
 
       {activeSubTab === 'pos' ? (
