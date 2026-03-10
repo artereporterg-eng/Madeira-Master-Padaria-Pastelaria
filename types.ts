@@ -29,6 +29,9 @@ export interface Employee {
   photo?: string;
   curriculum?: string;
   idCard?: string;
+  paymentMethod?: 'Mão' | 'Transferência';
+  iban?: string;
+  signedReceipt?: string; // base64
 }
 
 export interface SalaryPayment {

@@ -23,7 +23,9 @@ import {
   Eye,
   Calendar,
   BarChart2,
-  Download
+  Download,
+  CreditCard,
+  Banknote
 } from 'lucide-react';
 import { 
   BarChart, 
@@ -436,13 +438,13 @@ const HRManager: React.FC<{
   hasPermission: (p: string) => boolean
 }> = ({ employees, setEmployees, salaryPayments, setSalaryPayments, hasPermission }) => {
   const [showAdd, setShowAdd] = useState(false);
-  const [newEmp, setNewEmp] = useState<Partial<Employee>>({ category: EmployeeCategory.BAKER });
+  const [newEmp, setNewEmp] = useState<Partial<Employee>>({ category: EmployeeCategory.BAKER, paymentMethod: 'Mão' });
   const [editingEmpId, setEditingEmpId] = useState<string | null>(null);
 
   const canManage = hasPermission('manage:employees');
   const canPay = hasPermission('manage:salaries');
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>, field: 'photo' | 'curriculum' | 'idCard') => {
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>, field: 'photo' | 'curriculum' | 'idCard' | 'signedReceipt') => {
     const file = e.target.files?.[0];
     if (file) {
       const reader = new FileReader();
@@ -463,7 +465,10 @@ const HRManager: React.FC<{
           salary: Number(newEmp.salary),
           photo: newEmp.photo,
           curriculum: newEmp.curriculum,
-          idCard: newEmp.idCard
+          idCard: newEmp.idCard,
+          paymentMethod: newEmp.paymentMethod as 'Mão' | 'Transferência',
+          iban: newEmp.iban,
+          signedReceipt: newEmp.signedReceipt
         } : emp));
         setEditingEmpId(null);
       } else {
@@ -475,11 +480,14 @@ const HRManager: React.FC<{
           hiredDate: new Date().toISOString(),
           photo: newEmp.photo,
           curriculum: newEmp.curriculum,
-          idCard: newEmp.idCard
+          idCard: newEmp.idCard,
+          paymentMethod: newEmp.paymentMethod as 'Mão' | 'Transferência',
+          iban: newEmp.iban,
+          signedReceipt: newEmp.signedReceipt
         }]);
       }
       setShowAdd(false);
-      setNewEmp({ category: EmployeeCategory.BAKER });
+      setNewEmp({ category: EmployeeCategory.BAKER, paymentMethod: 'Mão' });
     }
   };
 
@@ -562,6 +570,41 @@ const HRManager: React.FC<{
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-4 border-t border-slate-50">
             <div>
+              <label className="text-xs font-bold text-slate-500 uppercase mb-2 block">Forma de Pagamento</label>
+              <select 
+                className="w-full p-3 border rounded-xl focus:ring-2 focus:ring-amber-500 outline-none"
+                value={newEmp.paymentMethod || 'Mão'}
+                onChange={e => setNewEmp({...newEmp, paymentMethod: e.target.value as 'Mão' | 'Transferência'})}
+              >
+                <option value="Mão">Mão (Dinheiro)</option>
+                <option value="Transferência">Transferência Bancária</option>
+              </select>
+            </div>
+            {newEmp.paymentMethod === 'Transferência' ? (
+              <div className="md:col-span-2">
+                <label className="text-xs font-bold text-slate-500 uppercase mb-2 block">IBAN do Funcionário</label>
+                <input 
+                  className="w-full p-3 border rounded-xl focus:ring-2 focus:ring-amber-500 outline-none"
+                  value={newEmp.iban || ''}
+                  onChange={e => setNewEmp({...newEmp, iban: e.target.value})}
+                  placeholder="AO06 0000 0000 0000 0000 0"
+                />
+              </div>
+            ) : (
+              <div className="md:col-span-2">
+                <label className="text-xs font-bold text-slate-500 uppercase mb-2 block">Comprovativo Assinado (Upload)</label>
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 bg-slate-100 rounded-xl flex items-center justify-center border border-slate-200">
+                    <FileText size={20} className={newEmp.signedReceipt ? "text-amber-600" : "text-slate-400"} />
+                  </div>
+                  <input type="file" className="text-xs flex-1" onChange={e => handleFileUpload(e, 'signedReceipt')} />
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-4 border-t border-slate-50">
+            <div>
               <label className="text-xs font-bold text-slate-500 uppercase mb-2 block">Foto Tipo Passe</label>
               <div className="flex items-center gap-3">
                 <div className="w-12 h-12 bg-slate-100 rounded-xl flex items-center justify-center overflow-hidden border border-slate-200">
@@ -629,7 +672,13 @@ const HRManager: React.FC<{
               </div>
               <div>
                 <h4 className="font-bold text-slate-800 text-lg">{emp.name}</h4>
-                <span className="px-2 py-0.5 bg-amber-100 text-amber-700 text-[10px] font-bold uppercase rounded-full">{emp.category}</span>
+                <div className="flex gap-2 items-center">
+                  <span className="px-2 py-0.5 bg-amber-100 text-amber-700 text-[10px] font-bold uppercase rounded-full">{emp.category}</span>
+                  <span className="flex items-center gap-1 text-[10px] font-bold text-slate-400 uppercase">
+                    {emp.paymentMethod === 'Transferência' ? <CreditCard size={12} /> : <Banknote size={12} />}
+                    {emp.paymentMethod || 'Mão'}
+                  </span>
+                </div>
               </div>
             </div>
             <div className="space-y-4 mb-6">
@@ -658,6 +707,18 @@ const HRManager: React.FC<{
                       title="Ver BI"
                     >
                       <Eye size={16} />
+                    </button>
+                  )}
+                  {emp.signedReceipt && (
+                    <button 
+                      onClick={() => {
+                        const win = window.open();
+                        win?.document.write(`<img src="${emp.signedReceipt}" style="max-width: 100%; height: auto;" />`);
+                      }}
+                      className="p-2 bg-slate-50 text-slate-500 hover:text-amber-600 rounded-lg transition-colors" 
+                      title="Ver Comprovativo"
+                    >
+                      <FileText size={16} />
                     </button>
                   )}
                 </div>
