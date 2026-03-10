@@ -27,47 +27,47 @@ const InvoicePrinter: React.FC<InvoicePrinterProps> = ({
   return (
     <div className="flex flex-col items-center gap-6 p-4">
       {/* Invoice Area */}
-      <div id="invoice-content" className="invoice-container w-full max-w-[800px] bg-white p-12 border border-slate-100 shadow-sm rounded-sm font-sans text-slate-800 print:m-0 print:p-[2cm] print:shadow-none print:border-none">
+      <div id="invoice-content" className="invoice-container w-full max-w-[600px] bg-white p-8 border border-slate-100 shadow-sm rounded-sm font-sans text-slate-800 print:m-0 print:p-[1cm] print:shadow-none print:border-none">
         {/* Header */}
-        <div className="flex justify-between items-start border-b border-slate-200 pb-8 mb-8">
+        <div className="flex justify-between items-start border-b border-slate-200 pb-6 mb-6">
           <div>
-            <h1 className="text-2xl font-black text-amber-600 uppercase tracking-tighter">Madeira Master</h1>
-            <p className="text-xs text-slate-500 font-bold uppercase">Padaria & Pastelaria</p>
-            <div className="mt-4 text-sm text-slate-500">
+            <h1 className="text-xl font-black text-amber-600 uppercase tracking-tighter">Madeira Master</h1>
+            <p className="text-[10px] text-slate-500 font-bold uppercase">Padaria & Pastelaria</p>
+            <div className="mt-3 text-xs text-slate-500">
               <p>Rua Principal, Luanda, Angola</p>
               <p>NIF: 5401234567</p>
               <p>+244 923 000 000</p>
             </div>
           </div>
           <div className="text-right">
-            <h2 className="text-4xl font-light text-slate-300 uppercase tracking-widest mb-2">Fatura</h2>
-            <p className="text-sm font-bold text-slate-700">ID: {transactionId}</p>
-            <p className="text-sm text-slate-500">{new Date(date).toLocaleDateString('pt-AO')}</p>
+            <h2 className="text-3xl font-light text-slate-300 uppercase tracking-widest mb-1">Fatura</h2>
+            <p className="text-xs font-bold text-slate-700">ID: {transactionId}</p>
+            <p className="text-xs text-slate-500">{new Date(date).toLocaleDateString('pt-AO')}</p>
           </div>
         </div>
 
         {/* Customer Info */}
-        <div className="mb-12">
-          <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Faturado Para:</h3>
-          <p className="text-lg font-bold text-slate-800">{customerName}</p>
-          <p className="text-sm text-slate-500">Consumidor Final</p>
+        <div className="mb-8">
+          <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Faturado Para:</h3>
+          <p className="text-base font-bold text-slate-800">{customerName}</p>
+          <p className="text-xs text-slate-500">Consumidor Final</p>
         </div>
 
         {/* Table */}
-        <table className="w-full mb-12">
+        <table className="w-full mb-8">
           <thead>
             <tr className="text-left border-b-2 border-slate-800">
-              <th className="py-4 text-xs font-black uppercase tracking-wider">Descrição do Serviço/Produto</th>
-              <th className="py-4 text-right text-xs font-black uppercase tracking-wider">Total</th>
+              <th className="py-3 text-[10px] font-black uppercase tracking-wider">Descrição</th>
+              <th className="py-3 text-right text-[10px] font-black uppercase tracking-wider">Total</th>
             </tr>
           </thead>
           <tbody>
             <tr className="border-b border-slate-100">
-              <td className="py-6">
-                <p className="font-bold text-slate-800">{service}</p>
-                <p className="text-xs text-slate-400 mt-1">Transação via MCX/Stripe</p>
+              <td className="py-4">
+                <p className="text-sm font-bold text-slate-800">{service}</p>
+                <p className="text-[10px] text-slate-400 mt-0.5">Transação via MCX/Stripe</p>
               </td>
-              <td className="py-6 text-right font-bold text-slate-800">
+              <td className="py-4 text-right text-sm font-bold text-slate-800">
                 {amountKz.toLocaleString()} Kz
               </td>
             </tr>
@@ -76,29 +76,29 @@ const InvoicePrinter: React.FC<InvoicePrinterProps> = ({
 
         {/* Totals */}
         <div className="flex justify-end">
-          <div className="w-full max-w-[300px] space-y-3">
-            <div className="flex justify-between text-sm">
+          <div className="w-full max-w-[240px] space-y-2">
+            <div className="flex justify-between text-xs">
               <span className="text-slate-500 font-bold uppercase">Subtotal</span>
               <span className="font-bold">{amountKz.toLocaleString()} Kz</span>
             </div>
-            <div className="flex justify-between text-sm">
+            <div className="flex justify-between text-xs">
               <span className="text-slate-500 font-bold uppercase">Imposto (0%)</span>
               <span className="font-bold">0 Kz</span>
             </div>
-            <div className="flex justify-between items-center pt-4 border-t-2 border-slate-800">
-              <span className="text-lg font-black uppercase tracking-tighter">Total Pago</span>
-              <span className="text-2xl font-black text-amber-600">{amountKz.toLocaleString()} Kz</span>
+            <div className="flex justify-between items-center pt-3 border-t-2 border-slate-800">
+              <span className="text-sm font-black uppercase tracking-tighter">Total Pago</span>
+              <span className="text-xl font-black text-amber-600">{amountKz.toLocaleString()} Kz</span>
             </div>
           </div>
         </div>
 
         {/* Footer */}
-        <div className="mt-20 pt-8 border-t border-slate-100 text-center">
-          <p className="text-xs text-slate-400 font-medium">
-            Obrigado pela sua preferência! Esta fatura serve como comprovativo de pagamento.
+        <div className="mt-12 pt-6 border-t border-slate-100 text-center">
+          <p className="text-[10px] text-slate-400 font-medium">
+            Obrigado pela sua preferência!
           </p>
-          <p className="text-[10px] text-slate-300 mt-2 uppercase tracking-widest">
-            Madeira Master - Sistema de Gestão de Padaria
+          <p className="text-[9px] text-slate-300 mt-1 uppercase tracking-widest">
+            Madeira Master - Sistema de Gestão
           </p>
         </div>
       </div>
@@ -136,6 +136,7 @@ const InvoicePrinter: React.FC<InvoicePrinterProps> = ({
             margin: 0 !important;
             padding: 0 !important;
             background: white !important;
+            display: block !important;
           }
           body * {
             visibility: hidden !important;
@@ -144,16 +145,15 @@ const InvoicePrinter: React.FC<InvoicePrinterProps> = ({
             visibility: visible !important;
           }
           #invoice-content {
-            position: absolute !important;
-            left: 0 !important;
-            top: 0 !important;
-            width: 100% !important;
-            margin: 0 !important;
-            padding: 2cm !important;
+            position: relative !important;
+            margin: 1cm auto !important;
+            width: 140mm !important;
+            padding: 1cm !important;
             border: none !important;
             box-shadow: none !important;
             background: white !important;
             z-index: 99999 !important;
+            display: block !important;
           }
           .no-print {
             display: none !important;
