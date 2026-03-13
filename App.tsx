@@ -25,7 +25,8 @@ import {
   BarChart2,
   Download,
   CreditCard,
-  Banknote
+  Banknote,
+  Save
 } from 'lucide-react';
 import { 
   BarChart, 
@@ -46,6 +47,7 @@ import {
 } from './types';
 import { getBusinessInsights } from './services/geminiService';
 import InvoicePrinter from './src/components/InvoicePrinter';
+import { supabase, isSupabaseConfigured } from './supabaseClient';
 
 // --- Default Data ---
 const INITIAL_USERS: User[] = [
@@ -76,41 +78,81 @@ const App: React.FC = () => {
     return ROLE_PERMISSIONS[user.role].includes(permission);
   };
   
-  // App State with LocalStorage Persistence
-  const [users, setUsers] = useState<User[]>(() => {
-    const saved = localStorage.getItem('mm_users');
-    return saved ? JSON.parse(saved) : INITIAL_USERS;
-  });
-  const [employees, setEmployees] = useState<Employee[]>(() => JSON.parse(localStorage.getItem('mm_employees') || '[]'));
-  const [salaryPayments, setSalaryPayments] = useState<SalaryPayment[]>(() => JSON.parse(localStorage.getItem('mm_salaries') || '[]'));
-  const [expenses, setExpenses] = useState<Expense[]>(() => JSON.parse(localStorage.getItem('mm_expenses') || '[]'));
-  const [ingredients, setIngredients] = useState<Ingredient[]>(() => JSON.parse(localStorage.getItem('mm_ingredients') || '[]'));
-  const [products, setProducts] = useState<Product[]>(() => JSON.parse(localStorage.getItem('mm_products') || '[]'));
-  const [sales, setSales] = useState<Sale[]>(() => JSON.parse(localStorage.getItem('mm_sales') || '[]'));
-  const [productionLogs, setProductionLogs] = useState<ProductionLog[]>(() => JSON.parse(localStorage.getItem('mm_production_logs') || '[]'));
-  const [companyInfo, setCompanyInfo] = useState<CompanyInfo>(() => {
-    const saved = localStorage.getItem('mm_company_info');
-    return saved ? JSON.parse(saved) : {
-      name: 'Madeira Master',
-      nif: '5401234567',
-      address: 'Rua Principal, Luanda, Angola',
-      contact: '+244 923 000 000'
-    };
+  // App State with Supabase Persistence
+  const [users, setUsers] = useState<User[]>(INITIAL_USERS);
+  const [employees, setEmployees] = useState<Employee[]>([]);
+  const [salaryPayments, setSalaryPayments] = useState<SalaryPayment[]>([]);
+  const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [ingredients, setIngredients] = useState<Ingredient[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [sales, setSales] = useState<Sale[]>([]);
+  const [productionLogs, setProductionLogs] = useState<ProductionLog[]>([]);
+  const [companyInfo, setCompanyInfo] = useState<CompanyInfo>({
+    name: 'Madeira Master',
+    nif: '5401234567',
+    address: 'Rua Principal, Luanda, Angola',
+    contact: '+244 923 000 000'
   });
   const [aiInsight, setAiInsight] = useState<string>('');
   const [isAiLoading, setIsAiLoading] = useState(false);
 
+  // Fetch all data from Supabase on mount
   useEffect(() => {
-    localStorage.setItem('mm_users', JSON.stringify(users));
-    localStorage.setItem('mm_employees', JSON.stringify(employees));
-    localStorage.setItem('mm_salaries', JSON.stringify(salaryPayments));
-    localStorage.setItem('mm_expenses', JSON.stringify(expenses));
-    localStorage.setItem('mm_ingredients', JSON.stringify(ingredients));
-    localStorage.setItem('mm_products', JSON.stringify(products));
-    localStorage.setItem('mm_sales', JSON.stringify(sales));
-    localStorage.setItem('mm_production_logs', JSON.stringify(productionLogs));
-    localStorage.setItem('mm_company_info', JSON.stringify(companyInfo));
-  }, [users, employees, salaryPayments, expenses, ingredients, products, sales, productionLogs, companyInfo]);
+    if (!isSupabaseConfigured) {
+      console.log('Supabase não configurado. Usando dados locais/padrão.');
+      return;
+    }
+
+    const fetchAllData = async () => {
+      try {
+        const [
+          { data: usersData, error: usersError },
+          { data: employeesData, error: employeesError },
+          { data: salaryPaymentsData, error: salaryPaymentsError },
+          { data: expensesData, error: expensesError },
+          { data: ingredientsData, error: ingredientsError },
+          { data: productsData, error: productsError },
+          { data: salesData, error: salesError },
+          { data: productionLogsData, error: productionLogsError },
+          { data: companyInfoData, error: companyInfoError }
+        ] = await Promise.all([
+          supabase.from('users').select('*'),
+          supabase.from('employees').select('*'),
+          supabase.from('salary_payments').select('*'),
+          supabase.from('expenses').select('*'),
+          supabase.from('ingredients').select('*'),
+          supabase.from('products').select('*'),
+          supabase.from('sales').select('*'),
+          supabase.from('production_logs').select('*'),
+          supabase.from('company_info').select('*').single()
+        ]);
+
+        if (usersError) throw usersError;
+        if (employeesError) throw employeesError;
+        if (salaryPaymentsError) throw salaryPaymentsError;
+        if (expensesError) throw expensesError;
+        if (ingredientsError) throw ingredientsError;
+        if (productsError) throw productsError;
+        if (salesError) throw salesError;
+        if (productionLogsError) throw productionLogsError;
+
+        if (usersData && usersData.length > 0) setUsers(usersData);
+        setEmployees(employeesData || []);
+        setSalaryPayments(salaryPaymentsData || []);
+        setExpenses(expensesData || []);
+        setIngredients(ingredientsData || []);
+        setProducts(productsData || []);
+        setSales(salesData || []);
+        setProductionLogs(productionLogsData || []);
+        if (companyInfoData) setCompanyInfo(companyInfoData);
+      } catch (error: any) {
+        console.error('Erro ao carregar dados:', error);
+        alert('Erro ao conectar ao Supabase: ' + error.message);
+      }
+    };
+
+    fetchAllData();
+  }, []);
 
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
@@ -144,7 +186,21 @@ const App: React.FC = () => {
 
   if (!user) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-amber-50 to-orange-100 p-4">
+      <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-amber-50 to-orange-100 p-4">
+        {!isSupabaseConfigured && (
+          <div className="mb-6 max-w-md w-full bg-amber-100 border-l-4 border-amber-500 p-4 rounded-r-xl shadow-sm">
+            <div className="flex items-center">
+              <AlertTriangle className="text-amber-600 mr-3" size={24} />
+              <div>
+                <p className="font-bold text-amber-800">Modo Offline</p>
+                <p className="text-sm text-amber-700">
+                  O Supabase não está configurado. Os dados serão perdidos ao recarregar a página. 
+                  Configure as variáveis de ambiente para persistência na nuvem.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
         <div className="w-full max-w-md bg-white rounded-3xl shadow-2xl p-8 border border-amber-100">
           <div className="flex flex-col items-center mb-8">
             <div className="bg-amber-500 p-4 rounded-full mb-4 text-white shadow-lg">
@@ -473,40 +529,51 @@ const HRManager: React.FC<{
     }
   };
 
-  const saveEmployee = () => {
+  const saveEmployee = async () => {
     if (validateEmployee()) {
-      if (editingEmpId) {
-        setEmployees(employees.map(emp => emp.id === editingEmpId ? {
-          ...emp,
-          name: newEmp.name!,
-          category: newEmp.category as EmployeeCategory,
-          salary: Number(newEmp.salary),
-          photo: newEmp.photo,
-          curriculum: newEmp.curriculum,
-          idCard: newEmp.idCard,
-          paymentMethod: newEmp.paymentMethod as 'Mão' | 'Transferência',
-          iban: newEmp.iban,
-          signedReceipt: newEmp.signedReceipt
-        } : emp));
-        setEditingEmpId(null);
-      } else {
-        setEmployees([...employees, {
-          id: Math.random().toString(36).substr(2, 9),
-          name: newEmp.name,
-          category: newEmp.category as EmployeeCategory,
-          salary: Number(newEmp.salary),
-          hiredDate: new Date().toISOString(),
-          photo: newEmp.photo,
-          curriculum: newEmp.curriculum,
-          idCard: newEmp.idCard,
-          paymentMethod: newEmp.paymentMethod as 'Mão' | 'Transferência',
-          iban: newEmp.iban,
-          signedReceipt: newEmp.signedReceipt
-        }]);
+      try {
+        if (editingEmpId) {
+          const updatedEmp = {
+            name: newEmp.name!,
+            category: newEmp.category as EmployeeCategory,
+            salary: Number(newEmp.salary),
+            photo: newEmp.photo,
+            curriculum: newEmp.curriculum,
+            idCard: newEmp.idCard,
+            paymentMethod: newEmp.paymentMethod as 'Mão' | 'Transferência',
+            iban: newEmp.iban,
+            signedReceipt: newEmp.signedReceipt
+          };
+          const { error } = await supabase.from('employees').update(updatedEmp).eq('id', editingEmpId);
+          if (error) throw error;
+          
+          setEmployees(employees.map(emp => emp.id === editingEmpId ? { ...emp, ...updatedEmp } : emp));
+          setEditingEmpId(null);
+        } else {
+          const newEmployee: Employee = {
+            id: Math.random().toString(36).substr(2, 9),
+            name: newEmp.name!,
+            category: newEmp.category as EmployeeCategory,
+            salary: Number(newEmp.salary),
+            hiredDate: new Date().toISOString(),
+            photo: newEmp.photo,
+            curriculum: newEmp.curriculum,
+            idCard: newEmp.idCard,
+            paymentMethod: newEmp.paymentMethod as 'Mão' | 'Transferência',
+            iban: newEmp.iban,
+            signedReceipt: newEmp.signedReceipt
+          };
+          const { error } = await supabase.from('employees').insert(newEmployee);
+          if (error) throw error;
+          
+          setEmployees([...employees, newEmployee]);
+        }
+        setShowAdd(false);
+        setNewEmp({ category: EmployeeCategory.BAKER, paymentMethod: 'Mão' });
+        setErrors({});
+      } catch (error: any) {
+        alert('Erro ao salvar funcionário: ' + error.message);
       }
-      setShowAdd(false);
-      setNewEmp({ category: EmployeeCategory.BAKER, paymentMethod: 'Mão' });
-      setErrors({});
     }
   };
 
@@ -516,11 +583,19 @@ const HRManager: React.FC<{
     setShowAdd(true);
   };
 
-  const deleteEmployee = (id: string) => {
-    if (confirm('Tem certeza?')) setEmployees(employees.filter(e => e.id !== id));
+  const deleteEmployee = async (id: string) => {
+    if (confirm('Tem certeza?')) {
+      try {
+        const { error } = await supabase.from('employees').delete().eq('id', id);
+        if (error) throw error;
+        setEmployees(employees.filter(e => e.id !== id));
+      } catch (error: any) {
+        alert('Erro ao eliminar funcionário: ' + error.message);
+      }
+    }
   };
 
-  const paySalary = (emp: Employee) => {
+  const paySalary = async (emp: Employee) => {
     const payment: SalaryPayment = {
       id: Math.random().toString(36).substr(2, 9),
       employeeId: emp.id,
@@ -528,8 +603,14 @@ const HRManager: React.FC<{
       date: new Date().toISOString(),
       month: new Date().toLocaleString('pt-BR', { month: 'long' })
     };
-    setSalaryPayments([...salaryPayments, payment]);
-    alert(`Salário de ${emp.name} pago com sucesso!`);
+    try {
+      const { error } = await supabase.from('salary_payments').insert(payment);
+      if (error) throw error;
+      setSalaryPayments([...salaryPayments, payment]);
+      alert(`Salário de ${emp.name} pago com sucesso!`);
+    } catch (error: any) {
+      alert('Erro ao processar pagamento: ' + error.message);
+    }
   };
 
   return (
@@ -813,7 +894,7 @@ const InventoryManager: React.FC<{
     return Object.values(groups);
   }, [ingredients]);
 
-  const registerInitialStock = () => {
+  const registerInitialStock = async () => {
     if (!initialStockProdId || initialStockQty <= 0) {
       alert('Selecione um produto e uma quantidade válida!');
       return;
@@ -821,21 +902,22 @@ const InventoryManager: React.FC<{
     const product = products.find(p => p.id === initialStockProdId);
     if (!product) return;
 
-    const updatedProducts = products.map(p => {
-      if (p.id === initialStockProdId) {
-        return { ...p, stock: p.stock + initialStockQty };
-      }
-      return p;
-    });
+    try {
+      const newStock = product.stock + initialStockQty;
+      const { error } = await supabase.from('products').update({ stock: newStock }).eq('id', initialStockProdId);
+      if (error) throw error;
 
-    setProducts(updatedProducts);
-    alert(`Estoque inicial de ${initialStockQty}x ${product.name} registrado com sucesso!`);
-    setInitialStockProdId('');
-    setInitialStockQty(0);
-    setShowInitialStock(false);
+      setProducts(products.map(p => p.id === initialStockProdId ? { ...p, stock: newStock } : p));
+      alert(`Estoque inicial de ${initialStockQty}x ${product.name} registrado com sucesso!`);
+      setInitialStockProdId('');
+      setInitialStockQty(0);
+      setShowInitialStock(false);
+    } catch (error: any) {
+      alert('Erro ao registrar estoque inicial: ' + error.message);
+    }
   };
 
-  const produceProduct = () => {
+  const produceProduct = async () => {
     if (!simProdId) return;
     const product = products.find(p => p.id === simProdId);
     if (!product) return;
@@ -861,56 +943,64 @@ const InventoryManager: React.FC<{
       return;
     }
 
-    // Deduct ingredients (FIFO - First In First Out)
-    let tempIngredients = [...ingredients];
-    product.recipe.forEach(r => {
-      const recipeIng = ingredients.find(i => i.id === r.ingredientId);
-      if (!recipeIng) return;
+    try {
+      // Deduct ingredients (FIFO - First In First Out)
+      let tempIngredients = [...ingredients];
+      const updates = [];
       
-      let amountToDeduct = r.amount * simQty;
-      
-      // Sort by date if possible, otherwise just use order
-      tempIngredients = tempIngredients.map(ing => {
-        if (ing.name.toLowerCase() === recipeIng.name.toLowerCase() && ing.unit === recipeIng.unit && amountToDeduct > 0) {
-          const deduction = Math.min(ing.quantity, amountToDeduct);
-          amountToDeduct -= deduction;
-          return { ...ing, quantity: ing.quantity - deduction };
-        }
-        return ing;
+      product.recipe.forEach(r => {
+        const recipeIng = ingredients.find(i => i.id === r.ingredientId);
+        if (!recipeIng) return;
+        
+        let amountToDeduct = r.amount * simQty;
+        
+        tempIngredients = tempIngredients.map(ing => {
+          if (ing.name.toLowerCase() === recipeIng.name.toLowerCase() && ing.unit === recipeIng.unit && amountToDeduct > 0) {
+            const deduction = Math.min(ing.quantity, amountToDeduct);
+            amountToDeduct -= deduction;
+            const newQty = ing.quantity - deduction;
+            updates.push(supabase.from('ingredients').update({ quantity: newQty }).eq('id', ing.id));
+            return { ...ing, quantity: newQty };
+          }
+          return ing;
+        });
       });
-    });
 
-    // Increase product stock
-    const updatedProducts = products.map(p => {
-      if (p.id === simProdId) {
-        return { ...p, stock: p.stock + simQty };
-      }
-      return p;
-    });
+      // Increase product stock
+      const newProductStock = product.stock + simQty;
+      updates.push(supabase.from('products').update({ stock: newProductStock }).eq('id', simProdId));
 
-    setIngredients(tempIngredients);
-    setProducts(updatedProducts);
+      // Record production log
+      const newLog: ProductionLog = {
+        id: Math.random().toString(36).substr(2, 9),
+        productId: simProdId,
+        productName: product.name,
+        quantity: simQty,
+        timestamp: new Date().toISOString(),
+        ingredientsUsed: product.recipe.map(r => {
+          const ing = ingredients.find(i => i.id === r.ingredientId);
+          return {
+            ingredientId: r.ingredientId,
+            ingredientName: ing?.name || 'Insumo Desconhecido',
+            amount: r.amount * simQty,
+            unit: ing?.unit || ''
+          };
+        })
+      };
+      updates.push(supabase.from('production_logs').insert(newLog));
 
-    // Record production log
-    const newLog: ProductionLog = {
-      id: Math.random().toString(36).substr(2, 9),
-      productId: simProdId,
-      productName: product.name,
-      quantity: simQty,
-      timestamp: new Date().toISOString(),
-      ingredientsUsed: product.recipe.map(r => {
-        const ing = ingredients.find(i => i.id === r.ingredientId);
-        return {
-          ingredientId: r.ingredientId,
-          ingredientName: ing?.name || 'Insumo Desconhecido',
-          amount: r.amount * simQty,
-          unit: ing?.unit || ''
-        };
-      })
-    };
-    setProductionLogs([...productionLogs, newLog]);
+      const results = await Promise.all(updates);
+      const firstError = results.find(r => r.error)?.error;
+      if (firstError) throw firstError;
 
-    alert(`Produção de ${simQty}x ${product.name} concluída com sucesso!`);
+      setIngredients(tempIngredients);
+      setProducts(products.map(p => p.id === simProdId ? { ...p, stock: newProductStock } : p));
+      setProductionLogs([...productionLogs, newLog]);
+
+      alert(`Produção de ${simQty}x ${product.name} concluída com sucesso!`);
+    } catch (error: any) {
+      alert('Erro ao processar produção: ' + error.message);
+    }
   };
 
   const validateIngredient = () => {
@@ -923,30 +1013,41 @@ const InventoryManager: React.FC<{
     return Object.keys(newErrors).length === 0;
   };
 
-  const saveIngredient = () => {
+  const saveIngredient = async () => {
     if (validateIngredient()) {
-      if (editingIngId) {
-        setIngredients(ingredients.map(ing => ing.id === editingIngId ? {
-          ...ing,
-          name: newIng.name!,
-          unit: newIng.unit || 'kg',
-          quantity: Number(newIng.quantity),
-          costPerUnit: Number(newIng.costPerUnit || 0)
-        } : ing));
-        setEditingIngId(null);
-      } else {
-        setIngredients([...ingredients, {
-          id: Math.random().toString(36).substr(2, 9),
-          name: newIng.name,
-          unit: newIng.unit || 'kg',
-          quantity: Number(newIng.quantity),
-          costPerUnit: Number(newIng.costPerUnit || 0),
-          createdAt: new Date().toISOString()
-        }]);
+      try {
+        if (editingIngId) {
+          const updatedIng = {
+            name: newIng.name!,
+            unit: newIng.unit || 'kg',
+            quantity: Number(newIng.quantity),
+            costPerUnit: Number(newIng.costPerUnit || 0)
+          };
+          const { error } = await supabase.from('ingredients').update(updatedIng).eq('id', editingIngId);
+          if (error) throw error;
+          
+          setIngredients(ingredients.map(ing => ing.id === editingIngId ? { ...ing, ...updatedIng } : ing));
+          setEditingIngId(null);
+        } else {
+          const newIngredient: Ingredient = {
+            id: Math.random().toString(36).substr(2, 9),
+            name: newIng.name!,
+            unit: newIng.unit || 'kg',
+            quantity: Number(newIng.quantity),
+            costPerUnit: Number(newIng.costPerUnit || 0),
+            createdAt: new Date().toISOString()
+          };
+          const { error } = await supabase.from('ingredients').insert(newIngredient);
+          if (error) throw error;
+          
+          setIngredients([...ingredients, newIngredient]);
+        }
+        setShowAddIng(false);
+        setNewIng({ unit: 'kg' });
+        setErrors({});
+      } catch (error: any) {
+        alert('Erro ao salvar insumo: ' + error.message);
       }
-      setShowAddIng(false);
-      setNewIng({ unit: 'kg' });
-      setErrors({});
     }
   };
 
@@ -966,100 +1067,118 @@ const InventoryManager: React.FC<{
     return Object.keys(newErrors).length === 0;
   };
 
-  const saveProduct = () => {
+  const saveProduct = async () => {
     if (validateProduct()) {
-      const recipe = newProd.recipe || [];
-      const stockValue = Number(newProd.stock || 0);
-      let tempIngredients = [...ingredients];
+      try {
+        const recipe = newProd.recipe || [];
+        const stockValue = Number(newProd.stock || 0);
+        let tempIngredients = [...ingredients];
+        const updates = [];
 
-      // If it's a NEW product and has stock + recipe, trigger production logic
-      if (!editingProdId && stockValue > 0 && recipe.length > 0) {
-        // Check if enough ingredients (by name)
-        const missingIngredients: string[] = [];
-        recipe.forEach(r => {
-          const recipeIng = ingredients.find(i => i.id === r.ingredientId);
-          if (!recipeIng) return;
-          
-          const totalAvailable = ingredients
-            .filter(i => i.name.toLowerCase() === recipeIng.name.toLowerCase() && i.unit === recipeIng.unit)
-            .reduce((acc, i) => acc + i.quantity, 0);
+        // If it's a NEW product and has stock + recipe, trigger production logic
+        if (!editingProdId && stockValue > 0 && recipe.length > 0) {
+          // Check if enough ingredients (by name)
+          const missingIngredients: string[] = [];
+          recipe.forEach(r => {
+            const recipeIng = ingredients.find(i => i.id === r.ingredientId);
+            if (!recipeIng) return;
             
-          const required = r.amount * stockValue;
-          if (totalAvailable < required) {
-            missingIngredients.push(`${recipeIng.name}: Necessário ${required.toFixed(2)} ${recipeIng.unit} | Disponível ${totalAvailable.toFixed(2)} ${recipeIng.unit} | Falta ${(required - totalAvailable).toFixed(2)} ${recipeIng.unit}`);
-          }
-        });
+            const totalAvailable = ingredients
+              .filter(i => i.name.toLowerCase() === recipeIng.name.toLowerCase() && i.unit === recipeIng.unit)
+              .reduce((acc, i) => acc + i.quantity, 0);
+              
+            const required = r.amount * stockValue;
+            if (totalAvailable < required) {
+              missingIngredients.push(`${recipeIng.name}: Necessário ${required.toFixed(2)} ${recipeIng.unit} | Disponível ${totalAvailable.toFixed(2)} ${recipeIng.unit} | Falta ${(required - totalAvailable).toFixed(2)} ${recipeIng.unit}`);
+            }
+          });
 
-        if (missingIngredients.length > 0) {
-          alert(`Insumos insuficientes para produzir o estoque inicial deste produto:\n\n${missingIngredients.join('\n')}`);
-          return;
+          if (missingIngredients.length > 0) {
+            alert(`Insumos insuficientes para produzir o estoque inicial deste produto:\n\n${missingIngredients.join('\n')}`);
+            return;
+          }
+
+          // Deduct ingredients (FIFO)
+          recipe.forEach(r => {
+            const recipeIng = ingredients.find(i => i.id === r.ingredientId);
+            if (!recipeIng) return;
+            
+            let amountToDeduct = r.amount * stockValue;
+            
+            tempIngredients = tempIngredients.map(ing => {
+              if (ing.name.toLowerCase() === recipeIng.name.toLowerCase() && ing.unit === recipeIng.unit && amountToDeduct > 0) {
+                const deduction = Math.min(ing.quantity, amountToDeduct);
+                amountToDeduct -= deduction;
+                const newQty = ing.quantity - deduction;
+                updates.push(supabase.from('ingredients').update({ quantity: newQty }).eq('id', ing.id));
+                return { ...ing, quantity: newQty };
+              }
+              return ing;
+            });
+          });
+
+          // Record production log for initial stock
+          const newLog: ProductionLog = {
+            id: Math.random().toString(36).substr(2, 9),
+            productId: 'new-product', // Placeholder, will be updated if possible
+            productName: newProd.name!,
+            quantity: stockValue,
+            timestamp: new Date().toISOString(),
+            ingredientsUsed: recipe.map(r => {
+              const ing = ingredients.find(i => i.id === r.ingredientId);
+              return {
+                ingredientId: r.ingredientId,
+                ingredientName: ing?.name || 'Insumo Desconhecido',
+                amount: r.amount * stockValue,
+                unit: ing?.unit || ''
+              };
+            })
+          };
+          updates.push(supabase.from('production_logs').insert(newLog));
         }
 
-        // Deduct ingredients (FIFO)
-        recipe.forEach(r => {
-          const recipeIng = ingredients.find(i => i.id === r.ingredientId);
-          if (!recipeIng) return;
+        if (editingProdId) {
+          const updatedProd = {
+            name: newProd.name!,
+            price: Number(newProd.price),
+            stock: Number(newProd.stock),
+            image: newProd.image,
+            recipe: recipe
+          };
+          const { error } = await supabase.from('products').update(updatedProd).eq('id', editingProdId);
+          if (error) throw error;
           
-          let amountToDeduct = r.amount * stockValue;
+          setProducts(products.map(p => p.id === editingProdId ? { ...p, ...updatedProd } : p));
+          setEditingProdId(null);
+        } else {
+          const newProduct: Product = {
+            id: Math.random().toString(36).substr(2, 9),
+            name: newProd.name!,
+            price: Number(newProd.price),
+            stock: stockValue,
+            image: newProd.image,
+            createdAt: new Date().toISOString(),
+            recipe: recipe
+          };
+          const { error } = await supabase.from('products').insert(newProduct);
+          if (error) throw error;
           
-          tempIngredients = tempIngredients.map(ing => {
-            if (ing.name.toLowerCase() === recipeIng.name.toLowerCase() && ing.unit === recipeIng.unit && amountToDeduct > 0) {
-              const deduction = Math.min(ing.quantity, amountToDeduct);
-              amountToDeduct -= deduction;
-              return { ...ing, quantity: ing.quantity - deduction };
-            }
-            return ing;
-          });
-        });
+          setProducts([...products, newProduct]);
+        }
 
-        setIngredients(tempIngredients);
+        if (updates.length > 0) {
+          const results = await Promise.all(updates);
+          const firstError = results.find(r => r.error)?.error;
+          if (firstError) throw firstError;
+          setIngredients(tempIngredients);
+        }
 
-        // Record production log for initial stock
-        const newLog: ProductionLog = {
-          id: Math.random().toString(36).substr(2, 9),
-          productId: editingProdId || 'new-product', // Will be updated if possible, but at least we log it
-          productName: newProd.name!,
-          quantity: stockValue,
-          timestamp: new Date().toISOString(),
-          ingredientsUsed: recipe.map(r => {
-            const ing = ingredients.find(i => i.id === r.ingredientId);
-            return {
-              ingredientId: r.ingredientId,
-              ingredientName: ing?.name || 'Insumo Desconhecido',
-              amount: r.amount * stockValue,
-              unit: ing?.unit || ''
-            };
-          })
-        };
-        setProductionLogs(prev => [...prev, newLog]);
-
-        alert(`Produção inicial de ${stockValue}x ${newProd.name} concluída com sucesso!`);
+        setShowAddProd(false);
+        setNewProd({ stock: 0, recipe: [] });
+        setErrors({});
+      } catch (error: any) {
+        alert('Erro ao salvar produto: ' + error.message);
       }
-
-      if (editingProdId) {
-        setProducts(products.map(p => p.id === editingProdId ? {
-          ...p,
-          name: newProd.name!,
-          price: Number(newProd.price),
-          stock: Number(newProd.stock),
-          image: newProd.image,
-          recipe: recipe
-        } : p));
-        setEditingProdId(null);
-      } else {
-        setProducts([...products, {
-          id: Math.random().toString(36).substr(2, 9),
-          name: newProd.name,
-          price: Number(newProd.price),
-          stock: stockValue,
-          image: newProd.image,
-          createdAt: new Date().toISOString(),
-          recipe: recipe
-        }]);
-      }
-      setShowAddProd(false);
-      setNewProd({ stock: 0, recipe: [] });
-      setErrors({});
     }
   };
 
@@ -1596,7 +1715,7 @@ const SalesPOS: React.FC<{
     setCart(cart.filter(item => item.productId !== productId));
   };
 
-  const completeSale = () => {
+  const completeSale = async () => {
     if (cart.length === 0) {
       alert('O carrinho está vazio!');
       return;
@@ -1612,15 +1731,37 @@ const SalesPOS: React.FC<{
       sellerName: currentUser.username
     };
 
-    // Update stock
-    setProducts(products.map(p => {
-      const cartItem = cart.find(ci => ci.productId === p.id);
-      return cartItem ? { ...p, stock: p.stock - cartItem.quantity } : p;
-    }));
+    try {
+      const updates = [];
+      
+      // Insert sale
+      updates.push(supabase.from('sales').insert(newSale));
 
-    setSales([...sales, newSale]);
-    setShowReceipt(newSale);
-    setCart([]);
+      // Update stock for each product
+      cart.forEach(item => {
+        const product = products.find(p => p.id === item.productId);
+        if (product) {
+          const newStock = product.stock - item.quantity;
+          updates.push(supabase.from('products').update({ stock: newStock }).eq('id', item.productId));
+        }
+      });
+
+      const results = await Promise.all(updates);
+      const firstError = results.find(r => r.error)?.error;
+      if (firstError) throw firstError;
+
+      // Update local state
+      setProducts(products.map(p => {
+        const cartItem = cart.find(ci => ci.productId === p.id);
+        return cartItem ? { ...p, stock: p.stock - cartItem.quantity } : p;
+      }));
+
+      setSales([...sales, newSale]);
+      setShowReceipt(newSale);
+      setCart([]);
+    } catch (error: any) {
+      alert('Erro ao processar venda: ' + error.message);
+    }
   };
 
   return (
@@ -1845,18 +1986,27 @@ const FinanceManager: React.FC<{
     return Object.keys(newErrors).length === 0;
   };
 
-  const addExpense = () => {
+  const addExpense = async () => {
     if (validateExpense()) {
-      setExpenses([...expenses, {
-        id: Math.random().toString(36).substr(2, 9),
-        description: newExp.description!,
-        amount: Number(newExp.amount),
-        category: newExp.category || 'Outros',
-        date: new Date().toISOString()
-      }]);
-      setShowAdd(false);
-      setNewExp({});
-      setErrors({});
+      try {
+        const newExpense: Expense = {
+          id: Math.random().toString(36).substr(2, 9),
+          description: newExp.description!,
+          amount: Number(newExp.amount),
+          category: newExp.category || 'Outros',
+          date: new Date().toISOString()
+        };
+
+        const { error } = await supabase.from('expenses').insert(newExpense);
+        if (error) throw error;
+
+        setExpenses([...expenses, newExpense]);
+        setShowAdd(false);
+        setNewExp({});
+        setErrors({});
+      } catch (error: any) {
+        alert('Erro ao registar despesa: ' + error.message);
+      }
     }
   };
 
@@ -2064,31 +2214,65 @@ const UserManager: React.FC<{
     return Object.keys(newErrors).length === 0;
   };
 
-  const saveUser = () => {
+  const saveUser = async () => {
     if (validateUser()) {
-      if (editingId) {
-        setUsers(users.map(u => u.id === editingId ? { ...u, ...newUser } as User : u));
-        setEditingId(null);
-      } else {
-        setUsers([...users, {
-          id: Math.random().toString(36).substr(2, 9),
-          username: newUser.username,
-          password: newUser.password,
-          role: newUser.role || UserRole.STAFF
-        }]);
+      try {
+        if (editingId) {
+          const updatedUser = {
+            username: newUser.username!,
+            password: newUser.password!,
+            role: newUser.role || UserRole.STAFF
+          };
+          const { error } = await supabase.from('users').update(updatedUser).eq('id', editingId);
+          if (error) throw error;
+          
+          setUsers(users.map(u => u.id === editingId ? { ...u, ...updatedUser } as User : u));
+          setEditingId(null);
+        } else {
+          const newUserObj: User = {
+            id: Math.random().toString(36).substr(2, 9),
+            username: newUser.username!,
+            password: newUser.password!,
+            role: newUser.role || UserRole.STAFF
+          };
+          const { error } = await supabase.from('users').insert(newUserObj);
+          if (error) throw error;
+          
+          setUsers([...users, newUserObj]);
+        }
+        setShowAdd(false);
+        setNewUser({ role: UserRole.STAFF });
+        setErrors({});
+      } catch (error: any) {
+        alert('Erro ao salvar utilizador: ' + error.message);
       }
-      setShowAdd(false);
-      setNewUser({ role: UserRole.STAFF });
-      setErrors({});
     }
   };
 
-  const deleteUser = (id: string) => {
+  const deleteUser = async (id: string) => {
     if (id === currentUser.id) {
       alert('Não pode apagar o seu próprio utilizador!');
       return;
     }
-    if (confirm('Tem certeza?')) setUsers(users.filter(u => u.id !== id));
+    if (confirm('Tem certeza?')) {
+      try {
+        const { error } = await supabase.from('users').delete().eq('id', id);
+        if (error) throw error;
+        setUsers(users.filter(u => u.id !== id));
+      } catch (error: any) {
+        alert('Erro ao apagar utilizador: ' + error.message);
+      }
+    }
+  };
+
+  const saveCompanyInfo = async () => {
+    try {
+      const { error } = await supabase.from('company_info').upsert({ id: 'main', ...companyInfo });
+      if (error) throw error;
+      alert('Informações da empresa atualizadas com sucesso!');
+    } catch (error: any) {
+      alert('Erro ao salvar informações da empresa: ' + error.message);
+    }
   };
 
   const startEdit = (user: User) => {
@@ -2106,6 +2290,12 @@ const UserManager: React.FC<{
             <Settings className="text-amber-600" size={24} />
             Informações da Empresa (Fatura)
           </h3>
+          <button 
+            onClick={saveCompanyInfo}
+            className="bg-amber-600 text-white px-6 py-2 rounded-xl font-bold hover:bg-amber-500 transition-colors flex items-center gap-2"
+          >
+            <Save size={18} /> Salvar Configurações
+          </button>
         </div>
         
         <div className="bg-white p-8 rounded-3xl border border-slate-100 shadow-sm grid grid-cols-1 md:grid-cols-2 gap-6">
