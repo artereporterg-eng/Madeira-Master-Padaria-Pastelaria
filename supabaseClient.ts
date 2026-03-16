@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 
-// Helper to get environment variables safely in different environments
+// Auxiliar para obter variáveis de ambiente com segurança
 const getEnvVar = (name: string): string | undefined => {
   try {
     return (import.meta as any).env[name] || (process as any).env[name];
@@ -14,20 +14,42 @@ const supabaseAnonKey = getEnvVar('VITE_SUPABASE_ANON_KEY');
 
 export const isSupabaseConfigured = !!(supabaseUrl && supabaseAnonKey && supabaseUrl !== 'undefined' && supabaseAnonKey !== 'undefined');
 
-if (!isSupabaseConfigured) {
-  console.warn('Supabase is not configured. Data will not be persisted to the cloud. Please set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.');
-}
-
-// Only call createClient if we have valid configuration to avoid "supabaseUrl is required" error
+// Apenas chama createClient se tivermos configuração válida
 const realSupabase = isSupabaseConfigured 
   ? createClient(supabaseUrl!, supabaseAnonKey!)
   : null;
 
-// Proxy to prevent crashes when supabase is not configured
+// Utilitários para conversão de nomes de colunas (camelCase <-> snake_case) recursivos
+export const toSnakeCase = (obj: any): any => {
+  if (Array.isArray(obj)) return obj.map(toSnakeCase);
+  if (obj !== null && typeof obj === 'object' && !(obj instanceof Date)) {
+    const n: any = {};
+    for (const key in obj) {
+      const snakeKey = key.replace(/[A-Z]/g, letter => `_${letter.toLowerCase()}`);
+      n[snakeKey] = toSnakeCase(obj[key]);
+    }
+    return n;
+  }
+  return obj;
+};
+
+export const toCamelCase = (obj: any): any => {
+  if (Array.isArray(obj)) return obj.map(toCamelCase);
+  if (obj !== null && typeof obj === 'object' && !(obj instanceof Date)) {
+    const n: any = {};
+    for (const key in obj) {
+      const camelKey = key.replace(/(_\w)/g, m => m[1].toUpperCase());
+      n[camelKey] = toCamelCase(obj[key]);
+    }
+    return n;
+  }
+  return obj;
+};
+
+// Proxy para evitar erros quando o supabase não está configurado
 export const supabase = new Proxy({} as any, {
   get: (target, prop) => {
     if (!isSupabaseConfigured) {
-      // Return a dummy function/object that allows chaining to prevent crashes
       const dummyChain = () => dummyChain;
       dummyChain.select = () => Promise.resolve({ data: [], error: null });
       dummyChain.insert = () => Promise.resolve({ data: null, error: null });

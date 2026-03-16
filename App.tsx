@@ -47,7 +47,7 @@ import {
 } from './types';
 import { getBusinessInsights } from './services/geminiService';
 import InvoicePrinter from './src/components/InvoicePrinter';
-import { supabase, isSupabaseConfigured } from './supabaseClient';
+import { supabase, isSupabaseConfigured, toSnakeCase, toCamelCase } from './supabaseClient';
 
 // --- Default Data ---
 const INITIAL_USERS: User[] = [
@@ -66,6 +66,11 @@ const ROLE_PERMISSIONS: Record<UserRole, string[]> = {
   [UserRole.STAFF]: [
     'view:dashboard', 'view:sales'
   ],
+};
+
+// --- Sincronização Offline-First ---
+const saveToLocal = (key: string, data: any) => {
+  localStorage.setItem(key, JSON.stringify(data));
 };
 
 const App: React.FC = () => {
@@ -96,25 +101,49 @@ const App: React.FC = () => {
   const [aiInsight, setAiInsight] = useState<string>('');
   const [isAiLoading, setIsAiLoading] = useState(false);
 
-  // Fetch all data from Supabase on mount
+  // Efeito de Inicialização: Carrega do LocalStorage primeiro, depois sincroniza com Supabase
   useEffect(() => {
+    // 1. Carregar do LocalStorage (IMEDIATO)
+    const localData = {
+      users: localStorage.getItem('users'),
+      employees: localStorage.getItem('employees'),
+      salaryPayments: localStorage.getItem('salary_payments'),
+      expenses: localStorage.getItem('expenses'),
+      ingredients: localStorage.getItem('ingredients'),
+      products: localStorage.getItem('products'),
+      sales: localStorage.getItem('sales'),
+      productionLogs: localStorage.getItem('production_logs'),
+      companyInfo: localStorage.getItem('company_info')
+    };
+
+    if (localData.users) setUsers(JSON.parse(localData.users));
+    if (localData.employees) setEmployees(JSON.parse(localData.employees));
+    if (localData.salaryPayments) setSalaryPayments(JSON.parse(localData.salaryPayments));
+    if (localData.expenses) setExpenses(JSON.parse(localData.expenses));
+    if (localData.ingredients) setIngredients(JSON.parse(localData.ingredients));
+    if (localData.products) setProducts(JSON.parse(localData.products));
+    if (localData.sales) setSales(JSON.parse(localData.sales));
+    if (localData.productionLogs) setProductionLogs(JSON.parse(localData.productionLogs));
+    if (localData.companyInfo) setCompanyInfo(JSON.parse(localData.companyInfo));
+
     if (!isSupabaseConfigured) {
-      console.log('Supabase não configurado. Usando dados locais/padrão.');
+      console.log('Supabase não configurado. Operando apenas em modo LocalStorage.');
       return;
     }
 
+    // 2. Sincronizar com Supabase (ASSÍNCRONO)
     const fetchAllData = async () => {
       try {
         const [
-          { data: usersData, error: usersError },
-          { data: employeesData, error: employeesError },
-          { data: salaryPaymentsData, error: salaryPaymentsError },
-          { data: expensesData, error: expensesError },
-          { data: ingredientsData, error: ingredientsError },
-          { data: productsData, error: productsError },
-          { data: salesData, error: salesError },
-          { data: productionLogsData, error: productionLogsError },
-          { data: companyInfoData, error: companyInfoError }
+          { data: usersData },
+          { data: employeesData },
+          { data: salaryPaymentsData },
+          { data: expensesData },
+          { data: ingredientsData },
+          { data: productsData },
+          { data: salesData },
+          { data: productionLogsData },
+          { data: companyInfoData }
         ] = await Promise.all([
           supabase.from('users').select('*'),
           supabase.from('employees').select('*'),
@@ -127,27 +156,54 @@ const App: React.FC = () => {
           supabase.from('company_info').select('*').single()
         ]);
 
-        if (usersError) throw usersError;
-        if (employeesError) throw employeesError;
-        if (salaryPaymentsError) throw salaryPaymentsError;
-        if (expensesError) throw expensesError;
-        if (ingredientsError) throw ingredientsError;
-        if (productsError) throw productsError;
-        if (salesError) throw salesError;
-        if (productionLogsError) throw productionLogsError;
-
-        if (usersData && usersData.length > 0) setUsers(usersData);
-        setEmployees(employeesData || []);
-        setSalaryPayments(salaryPaymentsData || []);
-        setExpenses(expensesData || []);
-        setIngredients(ingredientsData || []);
-        setProducts(productsData || []);
-        setSales(salesData || []);
-        setProductionLogs(productionLogsData || []);
-        if (companyInfoData) setCompanyInfo(companyInfoData);
+        // Atualizar estados e LocalStorage com dados da nuvem (convertendo snake_case -> camelCase)
+        if (usersData) {
+          const formatted = usersData.map(toCamelCase);
+          setUsers(formatted);
+          saveToLocal('users', formatted);
+        }
+        if (employeesData) {
+          const formatted = employeesData.map(toCamelCase);
+          setEmployees(formatted);
+          saveToLocal('employees', formatted);
+        }
+        if (salaryPaymentsData) {
+          const formatted = salaryPaymentsData.map(toCamelCase);
+          setSalaryPayments(formatted);
+          saveToLocal('salary_payments', formatted);
+        }
+        if (expensesData) {
+          const formatted = expensesData.map(toCamelCase);
+          setExpenses(formatted);
+          saveToLocal('expenses', formatted);
+        }
+        if (ingredientsData) {
+          const formatted = ingredientsData.map(toCamelCase);
+          setIngredients(formatted);
+          saveToLocal('ingredients', formatted);
+        }
+        if (productsData) {
+          const formatted = productsData.map(toCamelCase);
+          setProducts(formatted);
+          saveToLocal('products', formatted);
+        }
+        if (salesData) {
+          const formatted = salesData.map(toCamelCase);
+          setSales(formatted);
+          saveToLocal('sales', formatted);
+        }
+        if (productionLogsData) {
+          const formatted = productionLogsData.map(toCamelCase);
+          setProductionLogs(formatted);
+          saveToLocal('production_logs', formatted);
+        }
+        if (companyInfoData) {
+          const formatted = toCamelCase(companyInfoData);
+          setCompanyInfo(formatted);
+          saveToLocal('company_info', formatted);
+        }
       } catch (error: any) {
-        console.error('Erro ao carregar dados:', error);
-        alert('Erro ao conectar ao Supabase: ' + error.message);
+        console.error('Erro na sincronização inicial:', error);
       }
     };
 
@@ -531,9 +587,9 @@ const HRManager: React.FC<{
 
   const saveEmployee = async () => {
     if (validateEmployee()) {
-      try {
-        if (editingEmpId) {
-          const updatedEmp = {
+      const employeeData: Employee = editingEmpId 
+        ? { 
+            ...employees.find(e => e.id === editingEmpId)!,
             name: newEmp.name!,
             category: newEmp.category as EmployeeCategory,
             salary: Number(newEmp.salary),
@@ -543,14 +599,8 @@ const HRManager: React.FC<{
             paymentMethod: newEmp.paymentMethod as 'Mão' | 'Transferência',
             iban: newEmp.iban,
             signedReceipt: newEmp.signedReceipt
-          };
-          const { error } = await supabase.from('employees').update(updatedEmp).eq('id', editingEmpId);
-          if (error) throw error;
-          
-          setEmployees(employees.map(emp => emp.id === editingEmpId ? { ...emp, ...updatedEmp } : emp));
-          setEditingEmpId(null);
-        } else {
-          const newEmployee: Employee = {
+          }
+        : {
             id: Math.random().toString(36).substr(2, 9),
             name: newEmp.name!,
             category: newEmp.category as EmployeeCategory,
@@ -563,17 +613,31 @@ const HRManager: React.FC<{
             iban: newEmp.iban,
             signedReceipt: newEmp.signedReceipt
           };
-          const { error } = await supabase.from('employees').insert(newEmployee);
-          if (error) throw error;
-          
-          setEmployees([...employees, newEmployee]);
-        }
-        setShowAdd(false);
-        setNewEmp({ category: EmployeeCategory.BAKER, paymentMethod: 'Mão' });
-        setErrors({});
-      } catch (error: any) {
-        alert('Erro ao salvar funcionário: ' + error.message);
+
+      // 1. Atualizar Estado + LocalStorage (IMEDIATO)
+      const updatedEmployees = editingEmpId 
+        ? employees.map(emp => emp.id === editingEmpId ? employeeData : emp)
+        : [...employees, employeeData];
+      
+      setEmployees(updatedEmployees);
+      saveToLocal('employees', updatedEmployees);
+      
+      // 2. Sincronizar com Supabase (ASSÍNCRONO)
+      const snakeData = toSnakeCase(employeeData);
+      if (editingEmpId) {
+        supabase.from('employees').update(snakeData).eq('id', editingEmpId).then(({ error }) => {
+          if (error) console.error('Erro ao sincronizar funcionário (update):', error);
+        });
+      } else {
+        supabase.from('employees').insert(snakeData).then(({ error }) => {
+          if (error) console.error('Erro ao sincronizar funcionário (insert):', error);
+        });
       }
+
+      setShowAdd(false);
+      setEditingEmpId(null);
+      setNewEmp({ category: EmployeeCategory.BAKER, paymentMethod: 'Mão' });
+      setErrors({});
     }
   };
 
@@ -1731,37 +1795,43 @@ const SalesPOS: React.FC<{
       sellerName: currentUser.username
     };
 
-    try {
-      const updates = [];
-      
-      // Insert sale
-      updates.push(supabase.from('sales').insert(newSale));
+    // 1. Atualizar Estado + LocalStorage (IMEDIATO)
+    // Vendas
+    const updatedSales = [...sales, newSale];
+    setSales(updatedSales);
+    saveToLocal('sales', updatedSales);
 
-      // Update stock for each product
-      cart.forEach(item => {
-        const product = products.find(p => p.id === item.productId);
-        if (product) {
-          const newStock = product.stock - item.quantity;
-          updates.push(supabase.from('products').update({ stock: newStock }).eq('id', item.productId));
-        }
-      });
+    // Estoque
+    const updatedProducts = products.map(p => {
+      const cartItem = cart.find(ci => ci.productId === p.id);
+      return cartItem ? { ...p, stock: p.stock - cartItem.quantity } : p;
+    });
+    setProducts(updatedProducts);
+    saveToLocal('products', updatedProducts);
 
-      const results = await Promise.all(updates);
-      const firstError = results.find(r => r.error)?.error;
-      if (firstError) throw firstError;
+    // 2. Sincronizar com Supabase (ASSÍNCRONO)
+    // Converter para snake_case e tratar o array de itens como JSON
+    const snakeSale = toSnakeCase({
+      ...newSale,
+      items: newSale.items // Supabase lida com JSONB se configurado
+    });
 
-      // Update local state
-      setProducts(products.map(p => {
-        const cartItem = cart.find(ci => ci.productId === p.id);
-        return cartItem ? { ...p, stock: p.stock - cartItem.quantity } : p;
-      }));
+    supabase.from('sales').insert(snakeSale).then(({ error }) => {
+      if (error) console.error('Erro ao sincronizar venda:', error);
+    });
 
-      setSales([...sales, newSale]);
-      setShowReceipt(newSale);
-      setCart([]);
-    } catch (error: any) {
-      alert('Erro ao processar venda: ' + error.message);
-    }
+    // Sincronizar estoque de cada produto
+    cart.forEach(item => {
+      const product = products.find(p => p.id === item.productId);
+      if (product) {
+        supabase.from('products').update({ stock: product.stock - item.quantity }).eq('id', item.productId).then(({ error }) => {
+          if (error) console.error(`Erro ao sincronizar estoque do produto ${item.productId}:`, error);
+        });
+      }
+    });
+
+    setShowReceipt(newSale);
+    setCart([]);
   };
 
   return (
