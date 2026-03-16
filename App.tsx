@@ -1,23 +1,3 @@
-// No seu App.tsx
-import { SchemaService } from './src/services/SchemaService';
-
-// ... dentro do componente App ...
-useEffect(() => {
-  const initApp = async () => {
-    // 1. Garantir que o esquema está pronto antes de carregar dados
-    const schemaResult = await SchemaService.repairSchema();
-    
-    if (schemaResult.success) {
-      // 2. Só depois carregar os dados (Sincronização Offline-First que já criamos)
-      // fetchAllData(); 
-    } else {
-      console.warn('Aviso de Esquema:', schemaResult.error);
-    }
-  };
-
-  initApp();
-}, []);
-
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { 
