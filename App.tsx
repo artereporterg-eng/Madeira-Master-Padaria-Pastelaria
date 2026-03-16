@@ -1079,21 +1079,15 @@ const InventoryManager: React.FC<{
 
   const saveIngredient = async () => {
     if (validateIngredient()) {
-      try {
-        if (editingIngId) {
-          const updatedIng = {
+      const ingredientData: Ingredient = editingIngId 
+        ? { 
+            ...ingredients.find(i => i.id === editingIngId)!,
             name: newIng.name!,
             unit: newIng.unit || 'kg',
             quantity: Number(newIng.quantity),
             costPerUnit: Number(newIng.costPerUnit || 0)
-          };
-          const { error } = await supabase.from('ingredients').update(updatedIng).eq('id', editingIngId);
-          if (error) throw error;
-          
-          setIngredients(ingredients.map(ing => ing.id === editingIngId ? { ...ing, ...updatedIng } : ing));
-          setEditingIngId(null);
-        } else {
-          const newIngredient: Ingredient = {
+          }
+        : {
             id: Math.random().toString(36).substr(2, 9),
             name: newIng.name!,
             unit: newIng.unit || 'kg',
@@ -1101,17 +1095,31 @@ const InventoryManager: React.FC<{
             costPerUnit: Number(newIng.costPerUnit || 0),
             createdAt: new Date().toISOString()
           };
-          const { error } = await supabase.from('ingredients').insert(newIngredient);
-          if (error) throw error;
-          
-          setIngredients([...ingredients, newIngredient]);
-        }
-        setShowAddIng(false);
-        setNewIng({ unit: 'kg' });
-        setErrors({});
-      } catch (error: any) {
-        alert('Erro ao salvar insumo: ' + error.message);
+
+      // 1. Atualizar Estado + LocalStorage (IMEDIATO)
+      const updatedIngredients = editingIngId 
+        ? ingredients.map(ing => ing.id === editingIngId ? ingredientData : ing)
+        : [...ingredients, ingredientData];
+      
+      setIngredients(updatedIngredients);
+      saveToLocal('ingredients', updatedIngredients);
+      
+      // 2. Sincronizar com Supabase (ASSÍNCRONO)
+      const snakeData = toSnakeCase(ingredientData);
+      if (editingIngId) {
+        supabase.from('ingredients').update(snakeData).eq('id', editingIngId).then(({ error }) => {
+          if (error) console.error('Erro ao sincronizar insumo (update):', error);
+        });
+      } else {
+        supabase.from('ingredients').insert(snakeData).then(({ error }) => {
+          if (error) console.error('Erro ao sincronizar insumo (insert):', error);
+        });
       }
+
+      setShowAddIng(false);
+      setEditingIngId(null);
+      setNewIng({ unit: 'kg' });
+      setErrors({});
     }
   };
 
@@ -1133,89 +1141,84 @@ const InventoryManager: React.FC<{
 
   const saveProduct = async () => {
     if (validateProduct()) {
-      try {
-        const recipe = newProd.recipe || [];
-        const stockValue = Number(newProd.stock || 0);
-        let tempIngredients = [...ingredients];
-        const updates = [];
+      const recipe = newProd.recipe || [];
+      const stockValue = Number(newProd.stock || 0);
+      let tempIngredients = [...ingredients];
+      const updates = [];
+      let newLog: ProductionLog | null = null;
 
-        // If it's a NEW product and has stock + recipe, trigger production logic
-        if (!editingProdId && stockValue > 0 && recipe.length > 0) {
-          // Check if enough ingredients (by name)
-          const missingIngredients: string[] = [];
-          recipe.forEach(r => {
-            const recipeIng = ingredients.find(i => i.id === r.ingredientId);
-            if (!recipeIng) return;
+      // If it's a NEW product and has stock + recipe, trigger production logic
+      if (!editingProdId && stockValue > 0 && recipe.length > 0) {
+        // Check if enough ingredients (by name)
+        const missingIngredients: string[] = [];
+        recipe.forEach(r => {
+          const recipeIng = ingredients.find(i => i.id === r.ingredientId);
+          if (!recipeIng) return;
+          
+          const totalAvailable = ingredients
+            .filter(i => i.name.toLowerCase() === recipeIng.name.toLowerCase() && i.unit === recipeIng.unit)
+            .reduce((acc, i) => acc + i.quantity, 0);
             
-            const totalAvailable = ingredients
-              .filter(i => i.name.toLowerCase() === recipeIng.name.toLowerCase() && i.unit === recipeIng.unit)
-              .reduce((acc, i) => acc + i.quantity, 0);
-              
-            const required = r.amount * stockValue;
-            if (totalAvailable < required) {
-              missingIngredients.push(`${recipeIng.name}: Necessário ${required.toFixed(2)} ${recipeIng.unit} | Disponível ${totalAvailable.toFixed(2)} ${recipeIng.unit} | Falta ${(required - totalAvailable).toFixed(2)} ${recipeIng.unit}`);
-            }
-          });
-
-          if (missingIngredients.length > 0) {
-            alert(`Insumos insuficientes para produzir o estoque inicial deste produto:\n\n${missingIngredients.join('\n')}`);
-            return;
+          const required = r.amount * stockValue;
+          if (totalAvailable < required) {
+            missingIngredients.push(`${recipeIng.name}: Necessário ${required.toFixed(2)} ${recipeIng.unit} | Disponível ${totalAvailable.toFixed(2)} ${recipeIng.unit} | Falta ${(required - totalAvailable).toFixed(2)} ${recipeIng.unit}`);
           }
+        });
 
-          // Deduct ingredients (FIFO)
-          recipe.forEach(r => {
-            const recipeIng = ingredients.find(i => i.id === r.ingredientId);
-            if (!recipeIng) return;
-            
-            let amountToDeduct = r.amount * stockValue;
-            
-            tempIngredients = tempIngredients.map(ing => {
-              if (ing.name.toLowerCase() === recipeIng.name.toLowerCase() && ing.unit === recipeIng.unit && amountToDeduct > 0) {
-                const deduction = Math.min(ing.quantity, amountToDeduct);
-                amountToDeduct -= deduction;
-                const newQty = ing.quantity - deduction;
-                updates.push(supabase.from('ingredients').update({ quantity: newQty }).eq('id', ing.id));
-                return { ...ing, quantity: newQty };
-              }
-              return ing;
-            });
-          });
-
-          // Record production log for initial stock
-          const newLog: ProductionLog = {
-            id: Math.random().toString(36).substr(2, 9),
-            productId: 'new-product', // Placeholder, will be updated if possible
-            productName: newProd.name!,
-            quantity: stockValue,
-            timestamp: new Date().toISOString(),
-            ingredientsUsed: recipe.map(r => {
-              const ing = ingredients.find(i => i.id === r.ingredientId);
-              return {
-                ingredientId: r.ingredientId,
-                ingredientName: ing?.name || 'Insumo Desconhecido',
-                amount: r.amount * stockValue,
-                unit: ing?.unit || ''
-              };
-            })
-          };
-          updates.push(supabase.from('production_logs').insert(newLog));
+        if (missingIngredients.length > 0) {
+          alert(`Insumos insuficientes para produzir o estoque inicial deste produto:\n\n${missingIngredients.join('\n')}`);
+          return;
         }
 
-        if (editingProdId) {
-          const updatedProd = {
+        // Deduct ingredients (FIFO)
+        recipe.forEach(r => {
+          const recipeIng = ingredients.find(i => i.id === r.ingredientId);
+          if (!recipeIng) return;
+          
+          let amountToDeduct = r.amount * stockValue;
+          
+          tempIngredients = tempIngredients.map(ing => {
+            if (ing.name.toLowerCase() === recipeIng.name.toLowerCase() && ing.unit === recipeIng.unit && amountToDeduct > 0) {
+              const deduction = Math.min(ing.quantity, amountToDeduct);
+              amountToDeduct -= deduction;
+              const newQty = ing.quantity - deduction;
+              updates.push(supabase.from('ingredients').update({ quantity: newQty }).eq('id', ing.id));
+              return { ...ing, quantity: newQty };
+            }
+            return ing;
+          });
+        });
+
+        // Record production log for initial stock
+        newLog = {
+          id: Math.random().toString(36).substr(2, 9),
+          productId: 'new-product', // Placeholder
+          productName: newProd.name!,
+          quantity: stockValue,
+          timestamp: new Date().toISOString(),
+          ingredientsUsed: recipe.map(r => {
+            const ing = ingredients.find(i => i.id === r.ingredientId);
+            return {
+              ingredientId: r.ingredientId,
+              ingredientName: ing?.name || 'Insumo Desconhecido',
+              amount: r.amount * stockValue,
+              unit: ing?.unit || ''
+            };
+          })
+        };
+        updates.push(supabase.from('production_logs').insert(toSnakeCase(newLog)));
+      }
+
+      const productData: Product = editingProdId 
+        ? { 
+            ...products.find(p => p.id === editingProdId)!,
             name: newProd.name!,
             price: Number(newProd.price),
             stock: Number(newProd.stock),
             image: newProd.image,
             recipe: recipe
-          };
-          const { error } = await supabase.from('products').update(updatedProd).eq('id', editingProdId);
-          if (error) throw error;
-          
-          setProducts(products.map(p => p.id === editingProdId ? { ...p, ...updatedProd } : p));
-          setEditingProdId(null);
-        } else {
-          const newProduct: Product = {
+          }
+        : {
             id: Math.random().toString(36).substr(2, 9),
             name: newProd.name!,
             price: Number(newProd.price),
@@ -1224,25 +1227,49 @@ const InventoryManager: React.FC<{
             createdAt: new Date().toISOString(),
             recipe: recipe
           };
-          const { error } = await supabase.from('products').insert(newProduct);
-          if (error) throw error;
-          
-          setProducts([...products, newProduct]);
-        }
 
-        if (updates.length > 0) {
-          const results = await Promise.all(updates);
-          const firstError = results.find(r => r.error)?.error;
-          if (firstError) throw firstError;
-          setIngredients(tempIngredients);
-        }
+      if (newLog) newLog.productId = productData.id;
 
-        setShowAddProd(false);
-        setNewProd({ stock: 0, recipe: [] });
-        setErrors({});
-      } catch (error: any) {
-        alert('Erro ao salvar produto: ' + error.message);
+      // 1. Atualizar Estado + LocalStorage (IMEDIATO)
+      const updatedProducts = editingProdId 
+        ? products.map(p => p.id === editingProdId ? productData : p)
+        : [...products, productData];
+      
+      setProducts(updatedProducts);
+      saveToLocal('products', updatedProducts);
+      
+      if (updates.length > 0) {
+        setIngredients(tempIngredients);
+        saveToLocal('ingredients', tempIngredients);
+        // Se houver log de produção, salvar também
+        if (newLog) {
+          const updatedLogs = [...productionLogs, newLog];
+          setProductionLogs(updatedLogs);
+          saveToLocal('production_logs', updatedLogs);
+        }
       }
+
+      // 2. Sincronizar com Supabase (ASSÍNCRONO)
+      const snakeData = toSnakeCase(productData);
+      if (editingProdId) {
+        supabase.from('products').update(snakeData).eq('id', editingProdId).then(({ error }) => {
+          if (error) console.error('Erro ao sincronizar produto (update):', error);
+        });
+      } else {
+        supabase.from('products').insert(snakeData).then(({ error }) => {
+          if (error) console.error('Erro ao sincronizar produto (insert):', error);
+        });
+      }
+
+      // Executar outros updates (ingredientes e logs)
+      updates.forEach(u => u.then(({ error }) => {
+        if (error) console.error('Erro ao sincronizar atualização relacionada ao produto:', error);
+      }));
+
+      setShowAddProd(false);
+      setEditingProdId(null);
+      setNewProd({ stock: 0, recipe: [] });
+      setErrors({});
     }
   };
 
@@ -2058,25 +2085,28 @@ const FinanceManager: React.FC<{
 
   const addExpense = async () => {
     if (validateExpense()) {
-      try {
-        const newExpense: Expense = {
-          id: Math.random().toString(36).substr(2, 9),
-          description: newExp.description!,
-          amount: Number(newExp.amount),
-          category: newExp.category || 'Outros',
-          date: new Date().toISOString()
-        };
+      const expenseData: Expense = {
+        id: Math.random().toString(36).substr(2, 9),
+        description: newExp.description!,
+        amount: Number(newExp.amount),
+        category: newExp.category || 'Outros',
+        date: new Date().toISOString()
+      };
 
-        const { error } = await supabase.from('expenses').insert(newExpense);
-        if (error) throw error;
+      // 1. Atualizar Estado + LocalStorage (IMEDIATO)
+      const updatedExpenses = [...expenses, expenseData];
+      setExpenses(updatedExpenses);
+      saveToLocal('expenses', updatedExpenses);
 
-        setExpenses([...expenses, newExpense]);
-        setShowAdd(false);
-        setNewExp({});
-        setErrors({});
-      } catch (error: any) {
-        alert('Erro ao registar despesa: ' + error.message);
-      }
+      // 2. Sincronizar com Supabase (ASSÍNCRONO)
+      const snakeData = toSnakeCase(expenseData);
+      supabase.from('expenses').insert(snakeData).then(({ error }) => {
+        if (error) console.error('Erro ao sincronizar despesa:', error);
+      });
+
+      setShowAdd(false);
+      setNewExp({});
+      setErrors({});
     }
   };
 
