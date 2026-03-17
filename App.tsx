@@ -47,7 +47,7 @@ import {
 } from './types';
 import { getBusinessInsights } from './services/geminiService';
 import InvoicePrinter from './src/components/InvoicePrinter';
-import { supabase, isSupabaseConfigured, toSnakeCase, toCamelCase } from './supabaseClient';
+import { supabase, isSupabaseConfigured, toSnakeCase, toCamelCase, checkConnection } from './supabaseClient';
 
 // --- Default Data ---
 const INITIAL_USERS: User[] = [
@@ -101,8 +101,16 @@ const App: React.FC = () => {
   const [aiInsight, setAiInsight] = useState<string>('');
   const [isAiLoading, setIsAiLoading] = useState(false);
 
+  const [isOnline, setIsOnline] = useState<boolean>(isSupabaseConfigured);
+
   // Efeito de Inicialização: Carrega do LocalStorage primeiro, depois sincroniza com Supabase
   useEffect(() => {
+    // Verificar conexão periodicamente
+    const interval = setInterval(async () => {
+      const status = await checkConnection();
+      setIsOnline(status);
+    }, 10000);
+
     // 1. Carregar do LocalStorage (IMEDIATO)
     const localData = {
       users: localStorage.getItem('users'),
@@ -347,10 +355,16 @@ const App: React.FC = () => {
             <h2 className="text-2xl font-bold text-slate-800 capitalize">{activeTab.replace('inventory', 'Estoque').replace('hr', 'Recursos Humanos').replace('finance', 'Financeiro').replace('settings', 'Configurações').replace('reports', 'Relatórios Periódicos')}</h2>
             <p className="text-slate-500 text-sm">Bem-vindo à gestão centralizada da sua padaria.</p>
           </div>
-          <div className="text-right">
-            <p className="text-xs font-semibold text-slate-400 uppercase">Data Atual</p>
-            <p className="text-sm font-medium text-slate-700">{new Date().toLocaleDateString('pt-AO')}</p>
-          </div>
+            <div className="flex items-center gap-4">
+              <div className={`flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold ${isOnline ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'}`}>
+                <div className={`w-2 h-2 rounded-full ${isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'}`}></div>
+                {isOnline ? 'Online' : 'Offline'}
+              </div>
+              <div className="text-right">
+                <p className="text-xs font-semibold text-slate-400 uppercase">Data Atual</p>
+                <p className="text-sm font-medium text-slate-700">{new Date().toLocaleDateString('pt-AO')}</p>
+              </div>
+            </div>
         </header>
 
         {activeTab === 'dashboard' && (
@@ -650,13 +664,15 @@ const HRManager: React.FC<{
 
   const deleteEmployee = async (id: string) => {
     if (confirm('Tem certeza?')) {
-      try {
-        const { error } = await supabase.from('employees').delete().eq('id', id);
-        if (error) throw error;
-        setEmployees(employees.filter(e => e.id !== id));
-      } catch (error: any) {
-        alert('Erro ao eliminar funcionário: ' + error.message);
-      }
+      // 1. Local
+      const updated = employees.filter(e => e.id !== id);
+      setEmployees(updated);
+      saveToLocal('employees', updated);
+
+      // 2. Background Sync
+      supabase.from('employees').delete().eq('id', id).then(({ error }) => {
+        if (error) console.error('Erro ao sincronizar exclusão de funcionário:', error);
+      });
     }
   };
 
@@ -668,14 +684,18 @@ const HRManager: React.FC<{
       date: new Date().toISOString(),
       month: new Date().toLocaleString('pt-BR', { month: 'long' })
     };
-    try {
-      const { error } = await supabase.from('salary_payments').insert(payment);
-      if (error) throw error;
-      setSalaryPayments([...salaryPayments, payment]);
-      alert(`Salário de ${emp.name} pago com sucesso!`);
-    } catch (error: any) {
-      alert('Erro ao processar pagamento: ' + error.message);
-    }
+
+    // 1. Local
+    const updated = [...salaryPayments, payment];
+    setSalaryPayments(updated);
+    saveToLocal('salary_payments', updated);
+
+    // 2. Background Sync
+    supabase.from('salary_payments').insert(toSnakeCase(payment)).then(({ error }) => {
+      if (error) console.error('Erro ao sincronizar pagamento de salário:', error);
+    });
+    
+    alert(`Salário de ${emp.name} pago com sucesso!`);
   };
 
   return (
@@ -967,19 +987,22 @@ const InventoryManager: React.FC<{
     const product = products.find(p => p.id === initialStockProdId);
     if (!product) return;
 
-    try {
-      const newStock = product.stock + initialStockQty;
-      const { error } = await supabase.from('products').update({ stock: newStock }).eq('id', initialStockProdId);
-      if (error) throw error;
+    const newStock = product.stock + initialStockQty;
 
-      setProducts(products.map(p => p.id === initialStockProdId ? { ...p, stock: newStock } : p));
-      alert(`Estoque inicial de ${initialStockQty}x ${product.name} registrado com sucesso!`);
-      setInitialStockProdId('');
-      setInitialStockQty(0);
-      setShowInitialStock(false);
-    } catch (error: any) {
-      alert('Erro ao registrar estoque inicial: ' + error.message);
-    }
+    // 1. Local
+    const updated = products.map(p => p.id === initialStockProdId ? { ...p, stock: newStock } : p);
+    setProducts(updated);
+    saveToLocal('products', updated);
+
+    // 2. Background Sync
+    supabase.from('products').update({ stock: newStock }).eq('id', initialStockProdId).then(({ error }) => {
+      if (error) console.error('Erro ao sincronizar estoque inicial:', error);
+    });
+
+    alert(`Estoque inicial de ${initialStockQty}x ${product.name} registrado com sucesso!`);
+    setInitialStockProdId('');
+    setInitialStockQty(0);
+    setShowInitialStock(false);
   };
 
   const produceProduct = async () => {
@@ -1008,64 +1031,77 @@ const InventoryManager: React.FC<{
       return;
     }
 
-    try {
-      // Deduct ingredients (FIFO - First In First Out)
-      let tempIngredients = [...ingredients];
-      const updates = [];
+    // Deduct ingredients (FIFO - First In First Out)
+    let tempIngredients = [...ingredients];
+    const updates = [];
+    
+    product.recipe.forEach(r => {
+      const recipeIng = ingredients.find(i => i.id === r.ingredientId);
+      if (!recipeIng) return;
       
-      product.recipe.forEach(r => {
-        const recipeIng = ingredients.find(i => i.id === r.ingredientId);
-        if (!recipeIng) return;
-        
-        let amountToDeduct = r.amount * simQty;
-        
-        tempIngredients = tempIngredients.map(ing => {
-          if (ing.name.toLowerCase() === recipeIng.name.toLowerCase() && ing.unit === recipeIng.unit && amountToDeduct > 0) {
-            const deduction = Math.min(ing.quantity, amountToDeduct);
-            amountToDeduct -= deduction;
-            const newQty = ing.quantity - deduction;
-            updates.push(supabase.from('ingredients').update({ quantity: newQty }).eq('id', ing.id));
-            return { ...ing, quantity: newQty };
-          }
-          return ing;
-        });
+      let amountToDeduct = r.amount * simQty;
+      
+      tempIngredients = tempIngredients.map(ing => {
+        if (ing.name.toLowerCase() === recipeIng.name.toLowerCase() && ing.unit === recipeIng.unit && amountToDeduct > 0) {
+          const deduction = Math.min(ing.quantity, amountToDeduct);
+          amountToDeduct -= deduction;
+          const newQty = ing.quantity - deduction;
+          updates.push(supabase.from('ingredients').update({ quantity: newQty }).eq('id', ing.id));
+          return { ...ing, quantity: newQty };
+        }
+        return ing;
       });
+    });
 
-      // Increase product stock
-      const newProductStock = product.stock + simQty;
-      updates.push(supabase.from('products').update({ stock: newProductStock }).eq('id', simProdId));
+    // Increase product stock
+    const newProductStock = product.stock + simQty;
 
-      // Record production log
-      const newLog: ProductionLog = {
-        id: Math.random().toString(36).substr(2, 9),
-        productId: simProdId,
-        productName: product.name,
-        quantity: simQty,
-        timestamp: new Date().toISOString(),
-        ingredientsUsed: product.recipe.map(r => {
-          const ing = ingredients.find(i => i.id === r.ingredientId);
-          return {
-            ingredientId: r.ingredientId,
-            ingredientName: ing?.name || 'Insumo Desconhecido',
-            amount: r.amount * simQty,
-            unit: ing?.unit || ''
-          };
-        })
-      };
-      updates.push(supabase.from('production_logs').insert(newLog));
+    // Record production log
+    const newLog: ProductionLog = {
+      id: Math.random().toString(36).substr(2, 9),
+      productId: simProdId,
+      productName: product.name,
+      quantity: simQty,
+      timestamp: new Date().toISOString(),
+      ingredientsUsed: product.recipe.map(r => {
+        const ing = ingredients.find(i => i.id === r.ingredientId);
+        return {
+          ingredientId: r.ingredientId,
+          ingredientName: ing?.name || 'Insumo Desconhecido',
+          amount: r.amount * simQty,
+          unit: ing?.unit || ''
+        };
+      })
+    };
 
-      const results = await Promise.all(updates);
-      const firstError = results.find(r => r.error)?.error;
-      if (firstError) throw firstError;
+    // 1. Local
+    const updatedProducts = products.map(p => p.id === simProdId ? { ...p, stock: newProductStock } : p);
+    setProducts(updatedProducts);
+    saveToLocal('products', updatedProducts);
+    
+    setIngredients(tempIngredients);
+    saveToLocal('ingredients', tempIngredients);
+    
+    const updatedLogs = [...productionLogs, newLog];
+    setProductionLogs(updatedLogs);
+    saveToLocal('production_logs', updatedLogs);
 
-      setIngredients(tempIngredients);
-      setProducts(products.map(p => p.id === simProdId ? { ...p, stock: newProductStock } : p));
-      setProductionLogs([...productionLogs, newLog]);
+    // 2. Background Sync
+    supabase.from('products').update({ stock: newProductStock }).eq('id', simProdId).then(({ error }) => {
+      if (error) console.error('Erro ao sincronizar estoque de produção:', error);
+    });
+    
+    supabase.from('production_logs').insert(toSnakeCase(newLog)).then(({ error }) => {
+      if (error) console.error('Erro ao sincronizar log de produção:', error);
+    });
 
-      alert(`Produção de ${simQty}x ${product.name} concluída com sucesso!`);
-    } catch (error: any) {
-      alert('Erro ao processar produção: ' + error.message);
-    }
+    updates.forEach(u => u.then(({ error }) => {
+      if (error) console.error('Erro ao sincronizar dedução de insumo:', error);
+    }));
+
+    alert(`Produção de ${simQty}x ${product.name} concluída com sucesso!`);
+    setSimQty(1);
+    setSimProdId('');
   };
 
   const validateIngredient = () => {
@@ -2317,36 +2353,33 @@ const UserManager: React.FC<{
 
   const saveUser = async () => {
     if (validateUser()) {
-      try {
-        if (editingId) {
-          const updatedUser = {
-            username: newUser.username!,
-            password: newUser.password!,
-            role: newUser.role || UserRole.STAFF
-          };
-          const { error } = await supabase.from('users').update(updatedUser).eq('id', editingId);
-          if (error) throw error;
-          
-          setUsers(users.map(u => u.id === editingId ? { ...u, ...updatedUser } as User : u));
-          setEditingId(null);
-        } else {
-          const newUserObj: User = {
-            id: Math.random().toString(36).substr(2, 9),
-            username: newUser.username!,
-            password: newUser.password!,
-            role: newUser.role || UserRole.STAFF
-          };
-          const { error } = await supabase.from('users').insert(newUserObj);
-          if (error) throw error;
-          
-          setUsers([...users, newUserObj]);
-        }
-        setShowAdd(false);
-        setNewUser({ role: UserRole.STAFF });
-        setErrors({});
-      } catch (error: any) {
-        alert('Erro ao salvar utilizador: ' + error.message);
+      const userData: User = editingId 
+        ? { ...users.find(u => u.id === editingId)!, username: newUser.username!, password: newUser.password!, role: newUser.role || UserRole.STAFF }
+        : { id: Math.random().toString(36).substr(2, 9), username: newUser.username!, password: newUser.password!, role: newUser.role || UserRole.STAFF };
+
+      // 1. Local
+      const updated = editingId 
+        ? users.map(u => u.id === editingId ? userData : u)
+        : [...users, userData];
+      setUsers(updated);
+      saveToLocal('users', updated);
+
+      // 2. Background Sync
+      const snakeData = toSnakeCase(userData);
+      if (editingId) {
+        supabase.from('users').update(snakeData).eq('id', editingId).then(({ error }) => {
+          if (error) console.error('Erro ao sincronizar utilizador (update):', error);
+        });
+      } else {
+        supabase.from('users').insert(snakeData).then(({ error }) => {
+          if (error) console.error('Erro ao sincronizar utilizador (insert):', error);
+        });
       }
+
+      setShowAdd(false);
+      setEditingId(null);
+      setNewUser({ role: UserRole.STAFF });
+      setErrors({});
     }
   };
 
@@ -2356,24 +2389,27 @@ const UserManager: React.FC<{
       return;
     }
     if (confirm('Tem certeza?')) {
-      try {
-        const { error } = await supabase.from('users').delete().eq('id', id);
-        if (error) throw error;
-        setUsers(users.filter(u => u.id !== id));
-      } catch (error: any) {
-        alert('Erro ao apagar utilizador: ' + error.message);
-      }
+      // 1. Local
+      const updated = users.filter(u => u.id !== id);
+      setUsers(updated);
+      saveToLocal('users', updated);
+
+      // 2. Background Sync
+      supabase.from('users').delete().eq('id', id).then(({ error }) => {
+        if (error) console.error('Erro ao sincronizar exclusão de utilizador:', error);
+      });
     }
   };
 
   const saveCompanyInfo = async () => {
-    try {
-      const { error } = await supabase.from('company_info').upsert({ id: 'main', ...companyInfo });
-      if (error) throw error;
-      alert('Informações da empresa atualizadas com sucesso!');
-    } catch (error: any) {
-      alert('Erro ao salvar informações da empresa: ' + error.message);
-    }
+    // 1. Local
+    saveToLocal('company_info', companyInfo);
+    alert('Informações da empresa atualizadas localmente!');
+
+    // 2. Background Sync
+    supabase.from('company_info').upsert(toSnakeCase({ id: 'main', ...companyInfo })).then(({ error }) => {
+      if (error) console.error('Erro ao sincronizar informações da empresa:', error);
+    });
   };
 
   const startEdit = (user: User) => {

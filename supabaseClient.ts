@@ -17,9 +17,19 @@ export const isSupabaseConfigured = !!(
   supabaseAnonKey && 
   supabaseUrl !== 'undefined' && 
   supabaseAnonKey !== 'undefined' &&
-  !supabaseUrl.includes('your-project-id') &&
-  !supabaseAnonKey.includes('your-anon-key')
+  !supabaseUrl.includes('your-project-id')
 );
+
+// Função para testar conexão
+export const checkConnection = async (): Promise<boolean> => {
+  if (!isSupabaseConfigured) return false;
+  try {
+    const { error } = await (realSupabase as any).from('users').select('count', { count: 'exact', head: true }).limit(1);
+    return !error;
+  } catch (e) {
+    return false;
+  }
+};
 
 // Apenas chama createClient se tivermos configuração válida
 const realSupabase = isSupabaseConfigured 
