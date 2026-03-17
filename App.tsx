@@ -116,7 +116,8 @@ const App: React.FC = () => {
       companyInfo: localStorage.getItem('company_info')
     };
 
-    if (localData.users) setUsers(JSON.parse(localData.users));
+    const parsedUsers = localData.users ? JSON.parse(localData.users) : null;
+    if (parsedUsers && parsedUsers.length > 0) setUsers(parsedUsers);
     if (localData.employees) setEmployees(JSON.parse(localData.employees));
     if (localData.salaryPayments) setSalaryPayments(JSON.parse(localData.salaryPayments));
     if (localData.expenses) setExpenses(JSON.parse(localData.expenses));
@@ -157,7 +158,7 @@ const App: React.FC = () => {
         ]);
 
         // Atualizar estados e LocalStorage com dados da nuvem (convertendo snake_case -> camelCase)
-        if (usersData) {
+        if (usersData && usersData.length > 0) {
           const formatted = usersData.map(toCamelCase);
           setUsers(formatted);
           saveToLocal('users', formatted);
