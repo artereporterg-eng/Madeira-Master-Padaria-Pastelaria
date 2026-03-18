@@ -26,7 +26,8 @@ import {
   Download,
   CreditCard,
   Banknote,
-  Save
+  Save,
+  XCircle
 } from 'lucide-react';
 import { 
   BarChart, 
@@ -395,8 +396,10 @@ const App: React.FC = () => {
             ingredients={ingredients}
             setIngredients={setIngredients}
             currentUser={user}
+            users={users}
             hasPermission={hasPermission}
             companyInfo={companyInfo}
+            isOnline={isOnline}
           />
         )}
         {activeTab === 'inventory' && (
@@ -483,7 +486,8 @@ const Dashboard: React.FC<{
   isAiLoading: boolean,
   onFetchAi: () => void 
 }> = ({ sales, expenses, salaryPayments, aiInsight, isAiLoading, onFetchAi }) => {
-  const totalRevenue = useMemo(() => sales.reduce((acc, s) => acc + s.total, 0), [sales]);
+  const activeSales = useMemo(() => sales.filter(s => s.status !== 'voided'), [sales]);
+  const totalRevenue = useMemo(() => activeSales.reduce((acc, s) => acc + s.total, 0), [activeSales]);
   const totalExpenses = useMemo(() => 
     expenses.reduce((acc, e) => acc + e.amount, 0) + salaryPayments.reduce((acc, s) => acc + s.amount, 0), 
   [expenses, salaryPayments]);
@@ -495,7 +499,7 @@ const Dashboard: React.FC<{
         <Card title="Receita Total" value={`${totalRevenue.toLocaleString()} Kz`} icon={<TrendingUp size={24}/>} trend="up" />
         <Card title="Despesas Totais" value={`${totalExpenses.toLocaleString()} Kz`} icon={<Wallet size={24}/>} trend="down" />
         <Card title="Lucro Bruto" value={`${profit.toLocaleString()} Kz`} icon={<PieChart size={24}/>} trend={profit > 0 ? 'up' : 'down'} />
-        <Card title="Total de Vendas" value={sales.length.toString()} icon={<ShoppingCart size={24}/>} />
+        <Card title="Total de Vendas" value={activeSales.length.toString()} icon={<ShoppingCart size={24}/>} />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -516,12 +520,16 @@ const Dashboard: React.FC<{
               </thead>
               <tbody className="text-sm divide-y divide-slate-50">
                 {sales.slice(-5).reverse().map(sale => (
-                  <tr key={sale.id} className="group">
+                  <tr key={sale.id} className={`group ${sale.status === 'voided' ? 'opacity-50' : ''}`}>
                     <td className="py-4 text-slate-500">{new Date(sale.timestamp).toLocaleDateString()}</td>
                     <td className="py-4 text-slate-800 font-medium">{sale.items.length} itens</td>
                     <td className="py-4 font-bold text-slate-800">{sale.total.toLocaleString()} Kz</td>
                     <td className="py-4">
-                      <span className="px-2 py-1 bg-green-50 text-green-600 rounded-md text-[10px] font-bold uppercase">Concluído</span>
+                      {sale.status === 'voided' ? (
+                        <span className="px-2 py-1 bg-red-50 text-red-600 rounded-md text-[10px] font-bold uppercase">Anulada</span>
+                      ) : (
+                        <span className="px-2 py-1 bg-green-50 text-green-600 rounded-md text-[10px] font-bold uppercase">Concluído</span>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -568,6 +576,10 @@ const HRManager: React.FC<{
   const [newEmp, setNewEmp] = useState<Partial<Employee>>({ category: EmployeeCategory.BAKER, paymentMethod: 'Mão' });
   const [editingEmpId, setEditingEmpId] = useState<string | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
+
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [selectedEmpForPayment, setSelectedEmpForPayment] = useState<Employee | null>(null);
+  const [paymentProof, setPaymentProof] = useState<string | null>(null);
 
   const canManage = hasPermission('manage:employees');
   const canPay = hasPermission('manage:salaries');
@@ -676,13 +688,14 @@ const HRManager: React.FC<{
     }
   };
 
-  const paySalary = async (emp: Employee) => {
+  const paySalary = async (emp: Employee, proof: string) => {
     const payment: SalaryPayment = {
       id: Math.random().toString(36).substr(2, 9),
       employeeId: emp.id,
       amount: emp.salary,
       date: new Date().toISOString(),
-      month: new Date().toLocaleString('pt-BR', { month: 'long' })
+      month: new Date().toLocaleString('pt-BR', { month: 'long' }),
+      proof: proof
     };
 
     // 1. Local
@@ -696,6 +709,9 @@ const HRManager: React.FC<{
     });
     
     alert(`Salário de ${emp.name} pago com sucesso!`);
+    setShowPaymentModal(false);
+    setSelectedEmpForPayment(null);
+    setPaymentProof(null);
   };
 
   return (
@@ -927,7 +943,10 @@ const HRManager: React.FC<{
                 </div>
                 {canPay && (
                   <button 
-                    onClick={() => paySalary(emp)}
+                    onClick={() => {
+                      setSelectedEmpForPayment(emp);
+                      setShowPaymentModal(true);
+                    }}
                     className="bg-amber-600 text-white px-4 py-2 rounded-xl text-xs font-bold hover:bg-amber-700 transition-all shadow-md shadow-amber-100"
                   >
                     Pagar Agora
@@ -939,6 +958,75 @@ const HRManager: React.FC<{
         ))}
         {employees.length === 0 && <p className="col-span-full text-center py-20 text-slate-400">Nenhum funcionário cadastrado.</p>}
       </div>
+
+      {showPaymentModal && selectedEmpForPayment && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-3xl p-8 max-w-md w-full space-y-6 shadow-2xl animate-in zoom-in-95 duration-200">
+            <div className="text-center space-y-2">
+              <h3 className="text-2xl font-bold text-slate-800">Confirmar Pagamento</h3>
+              <p className="text-slate-500">
+                A pagar o salário de <span className="font-bold text-amber-600">{selectedEmpForPayment.name}</span> no valor de <span className="font-bold text-slate-800">{selectedEmpForPayment.salary.toLocaleString()} Kz</span>.
+              </p>
+            </div>
+
+            <div className="space-y-4">
+              <div className="border-2 border-dashed border-slate-200 rounded-2xl p-6 text-center hover:border-amber-400 transition-colors cursor-pointer relative">
+                <input 
+                  type="file" 
+                  accept="image/*,application/pdf"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) {
+                      const reader = new FileReader();
+                      reader.onloadend = () => setPaymentProof(reader.result as string);
+                      reader.readAsDataURL(file);
+                    }
+                  }}
+                  className="absolute inset-0 opacity-0 cursor-pointer"
+                />
+                {paymentProof ? (
+                  <div className="space-y-2">
+                    <div className="bg-emerald-100 text-emerald-700 p-2 rounded-lg text-xs font-bold flex items-center justify-center gap-2">
+                      <Save size={14} /> Comprovativo Carregado
+                    </div>
+                    <p className="text-[10px] text-slate-400">Clique para alterar o ficheiro</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <Download className="mx-auto text-slate-300" size={32} />
+                    <p className="text-sm font-medium text-slate-600">Carregar Comprovativo</p>
+                    <p className="text-[10px] text-slate-400">Imagem ou PDF (Máx 2MB)</p>
+                  </div>
+                )}
+              </div>
+
+              <div className="flex gap-3">
+                <button 
+                  onClick={() => {
+                    setShowPaymentModal(false);
+                    setSelectedEmpForPayment(null);
+                    setPaymentProof(null);
+                  }}
+                  className="flex-1 py-3 text-slate-500 font-bold hover:bg-slate-50 rounded-xl transition-colors"
+                >
+                  Cancelar
+                </button>
+                <button 
+                  disabled={!paymentProof}
+                  onClick={() => paySalary(selectedEmpForPayment, paymentProof!)}
+                  className={`flex-1 py-3 rounded-xl font-bold transition-all ${
+                    paymentProof 
+                      ? 'bg-amber-600 text-white hover:bg-amber-700 shadow-lg shadow-amber-100' 
+                      : 'bg-slate-100 text-slate-400 cursor-not-allowed'
+                  }`}
+                >
+                  Confirmar e Pagar
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -955,7 +1043,7 @@ const InventoryManager: React.FC<{
   const [showAddIng, setShowAddIng] = useState(false);
   const [newIng, setNewIng] = useState<Partial<Ingredient>>({ unit: 'kg' });
   const [showAddProd, setShowAddProd] = useState(false);
-  const [newProd, setNewProd] = useState<Partial<Product>>({ stock: 0 });
+  const [newProd, setNewProd] = useState<Partial<Product>>({ stock: 0, recipeYield: 1 });
   const [editingProdId, setEditingProdId] = useState<string | null>(null);
   const [editingIngId, setEditingIngId] = useState<string | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -1020,7 +1108,7 @@ const InventoryManager: React.FC<{
         .filter(i => i.name.toLowerCase() === recipeIng.name.toLowerCase() && i.unit === recipeIng.unit)
         .reduce((acc, i) => acc + i.quantity, 0);
         
-      const required = r.amount * simQty;
+      const required = (r.amount / (product.recipeYield || 1)) * simQty;
       if (totalAvailable < required) {
         missingIngredients.push(`${recipeIng.name}: Necessário ${required.toFixed(2)} ${recipeIng.unit} | Disponível ${totalAvailable.toFixed(2)} ${recipeIng.unit} | Falta ${(required - totalAvailable).toFixed(2)} ${recipeIng.unit}`);
       }
@@ -1039,7 +1127,7 @@ const InventoryManager: React.FC<{
       const recipeIng = ingredients.find(i => i.id === r.ingredientId);
       if (!recipeIng) return;
       
-      let amountToDeduct = r.amount * simQty;
+      let amountToDeduct = (r.amount / (product.recipeYield || 1)) * simQty;
       
       tempIngredients = tempIngredients.map(ing => {
         if (ing.name.toLowerCase() === recipeIng.name.toLowerCase() && ing.unit === recipeIng.unit && amountToDeduct > 0) {
@@ -1068,7 +1156,7 @@ const InventoryManager: React.FC<{
         return {
           ingredientId: r.ingredientId,
           ingredientName: ing?.name || 'Insumo Desconhecido',
-          amount: r.amount * simQty,
+          amount: (r.amount / (product.recipeYield || 1)) * simQty,
           unit: ing?.unit || ''
         };
       })
@@ -1170,6 +1258,7 @@ const InventoryManager: React.FC<{
     const newErrors: Record<string, string> = {};
     if (!newProd.name || newProd.name.trim().length < 2) newErrors.prodName = 'Nome obrigatório (min 2 carac.)';
     if (!newProd.price || Number(newProd.price) <= 0) newErrors.prodPrice = 'Preço deve ser maior que zero';
+    if (!newProd.recipeYield || Number(newProd.recipeYield) <= 0) newErrors.prodYield = 'Rendimento da receita deve ser maior que zero';
     if (newProd.stock !== undefined && Number(newProd.stock) < 0) newErrors.prodStock = 'Estoque inválido';
     
     setErrors(newErrors);
@@ -1185,7 +1274,8 @@ const InventoryManager: React.FC<{
       let newLog: ProductionLog | null = null;
 
       // If it's a NEW product and has stock + recipe, trigger production logic
-      if (!editingProdId && stockValue > 0 && recipe.length > 0) {
+    if (!editingProdId && stockValue > 0 && recipe.length > 0) {
+        const yieldVal = Number(newProd.recipeYield || 1);
         // Check if enough ingredients (by name)
         const missingIngredients: string[] = [];
         recipe.forEach(r => {
@@ -1196,7 +1286,7 @@ const InventoryManager: React.FC<{
             .filter(i => i.name.toLowerCase() === recipeIng.name.toLowerCase() && i.unit === recipeIng.unit)
             .reduce((acc, i) => acc + i.quantity, 0);
             
-          const required = r.amount * stockValue;
+          const required = (r.amount / yieldVal) * stockValue;
           if (totalAvailable < required) {
             missingIngredients.push(`${recipeIng.name}: Necessário ${required.toFixed(2)} ${recipeIng.unit} | Disponível ${totalAvailable.toFixed(2)} ${recipeIng.unit} | Falta ${(required - totalAvailable).toFixed(2)} ${recipeIng.unit}`);
           }
@@ -1212,7 +1302,7 @@ const InventoryManager: React.FC<{
           const recipeIng = ingredients.find(i => i.id === r.ingredientId);
           if (!recipeIng) return;
           
-          let amountToDeduct = r.amount * stockValue;
+          let amountToDeduct = (r.amount / yieldVal) * stockValue;
           
           tempIngredients = tempIngredients.map(ing => {
             if (ing.name.toLowerCase() === recipeIng.name.toLowerCase() && ing.unit === recipeIng.unit && amountToDeduct > 0) {
@@ -1238,7 +1328,7 @@ const InventoryManager: React.FC<{
             return {
               ingredientId: r.ingredientId,
               ingredientName: ing?.name || 'Insumo Desconhecido',
-              amount: r.amount * stockValue,
+              amount: (r.amount / yieldVal) * stockValue,
               unit: ing?.unit || ''
             };
           })
@@ -1253,7 +1343,8 @@ const InventoryManager: React.FC<{
             price: Number(newProd.price),
             stock: Number(newProd.stock),
             image: newProd.image,
-            recipe: recipe
+            recipe: recipe,
+            recipeYield: Number(newProd.recipeYield || 1)
           }
         : {
             id: Math.random().toString(36).substr(2, 9),
@@ -1262,7 +1353,8 @@ const InventoryManager: React.FC<{
             stock: stockValue,
             image: newProd.image,
             createdAt: new Date().toISOString(),
-            recipe: recipe
+            recipe: recipe,
+            recipeYield: Number(newProd.recipeYield || 1)
           };
 
       if (newLog) newLog.productId = productData.id;
@@ -1305,7 +1397,7 @@ const InventoryManager: React.FC<{
 
       setShowAddProd(false);
       setEditingProdId(null);
-      setNewProd({ stock: 0, recipe: [] });
+      setNewProd({ stock: 0, recipeYield: 1, recipe: [] });
       setErrors({});
     }
   };
@@ -1427,7 +1519,10 @@ const InventoryManager: React.FC<{
               <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Unidade</label>
               <select className="w-full p-3 border rounded-xl" value={newIng.unit} onChange={e => setNewIng({...newIng, unit: e.target.value})}>
                 <option value="kg">Quilos (kg)</option>
+                <option value="g">Gramas (g)</option>
+                <option value="mg">Mili gramas (mg)</option>
                 <option value="L">Litros (L)</option>
+                <option value="ml">Mili litros (ml)</option>
                 <option value="unit">Unidade</option>
               </select>
             </div>
@@ -1526,6 +1621,20 @@ const InventoryManager: React.FC<{
                 {errors.prodStock && <p className="text-[10px] text-red-500 mt-1 font-bold">{errors.prodStock}</p>}
               </div>
               <div>
+                <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Rendimento da Receita</label>
+                <input 
+                  placeholder="Ex: 50 (unidades)" 
+                  type="number" 
+                  className={`w-full p-3 border rounded-xl focus:ring-2 focus:ring-amber-500 outline-none ${errors.prodYield ? 'border-red-500 bg-red-50' : 'border-slate-200'}`}
+                  value={newProd.recipeYield || ''} 
+                  onChange={e => {
+                    setNewProd({...newProd, recipeYield: e.target.value});
+                    if (errors.prodYield) setErrors({...errors, prodYield: ''});
+                  }} 
+                />
+                {errors.prodYield && <p className="text-[10px] text-red-500 mt-1 font-bold">{errors.prodYield}</p>}
+              </div>
+              <div>
                 <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Imagem</label>
                 <input type="file" accept="image/*" className="text-xs w-full" onChange={handleImageUpload} />
               </div>
@@ -1535,10 +1644,10 @@ const InventoryManager: React.FC<{
             </div>
 
             <div className="border-t border-slate-100 pt-6">
-              <h4 className="text-sm font-bold text-slate-700 mb-4">Receita (Insumos por Unidade)</h4>
+              <h4 className="text-sm font-bold text-slate-700 mb-4">Receita (Insumos por Produção)</h4>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="space-y-3">
-                  <p className="text-xs text-slate-400 font-bold uppercase">Adicionar Insumo à Receita</p>
+                  <p className="text-xs text-slate-400 font-bold uppercase">Adicionar Insumo à Receita (Total da Produção)</p>
                   <div className="flex gap-2">
                     <select 
                       className="flex-1 p-2 border rounded-lg text-sm"
@@ -1717,34 +1826,37 @@ const InventoryManager: React.FC<{
             <div className="md:col-span-2 bg-slate-700/50 p-6 rounded-3xl border border-slate-700">
               <h4 className="text-sm font-bold text-amber-500 uppercase tracking-wider mb-6">Insumos Necessários</h4>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {simProdId ? (
-                  products.find(p => p.id === simProdId)?.recipe.map(r => {
-                    const recipeIng = ingredients.find(i => i.id === r.ingredientId);
-                    if (!recipeIng) return null;
+                {simProdId ? (() => {
+                    const product = products.find(p => p.id === simProdId);
+                    if (!product) return null;
                     
-                    const totalAvailable = ingredients
-                      .filter(i => i.name.toLowerCase() === recipeIng.name.toLowerCase() && i.unit === recipeIng.unit)
-                      .reduce((acc, i) => acc + i.quantity, 0);
+                    return product.recipe.map(r => {
+                      const recipeIng = ingredients.find(i => i.id === r.ingredientId);
+                      if (!recipeIng) return null;
                       
-                    const totalNeeded = r.amount * simQty;
-                    const isShort = totalAvailable < totalNeeded;
-                    
-                    return (
-                      <div key={r.ingredientId} className="flex justify-between items-center bg-slate-800 p-4 rounded-2xl border border-slate-700">
-                        <div>
-                          <p className="text-sm font-bold">{recipeIng.name}</p>
-                          <p className="text-[10px] text-slate-500">Total Disponível: {totalAvailable} {recipeIng.unit}</p>
+                      const totalAvailable = ingredients
+                        .filter(i => i.name.toLowerCase() === recipeIng.name.toLowerCase() && i.unit === recipeIng.unit)
+                        .reduce((acc, i) => acc + i.quantity, 0);
+                        
+                      const totalNeeded = (r.amount / (product.recipeYield || 1)) * simQty;
+                      const isShort = totalAvailable < totalNeeded;
+                      
+                      return (
+                        <div key={r.ingredientId} className="flex justify-between items-center bg-slate-800 p-4 rounded-2xl border border-slate-700">
+                          <div>
+                            <p className="text-sm font-bold">{recipeIng.name}</p>
+                            <p className="text-[10px] text-slate-500">Total Disponível: {totalAvailable} {recipeIng.unit}</p>
+                          </div>
+                          <div className="text-right">
+                            <p className={`text-lg font-black ${isShort ? 'text-red-400' : 'text-green-400'}`}>
+                              {totalNeeded.toFixed(2)} {recipeIng.unit}
+                            </p>
+                            {isShort && <p className="text-[10px] text-red-400 font-bold uppercase">Falta: {(totalNeeded - totalAvailable).toFixed(2)}</p>}
+                          </div>
                         </div>
-                        <div className="text-right">
-                          <p className={`text-lg font-black ${isShort ? 'text-red-400' : 'text-green-400'}`}>
-                            {totalNeeded} {recipeIng.unit}
-                          </p>
-                          {isShort && <p className="text-[10px] text-red-400 font-bold uppercase">Falta: {totalNeeded - totalAvailable}</p>}
-                        </div>
-                      </div>
-                    );
-                  })
-                ) : (
+                      );
+                    });
+                  })() : (
                   <p className="col-span-full text-center py-10 text-slate-500 italic">Selecione um produto para ver a relação de insumos.</p>
                 )}
                 {simProdId && products.find(p => p.id === simProdId)?.recipe.length === 0 && (
@@ -1778,12 +1890,34 @@ const SalesPOS: React.FC<{
   ingredients: Ingredient[],
   setIngredients: React.Dispatch<React.SetStateAction<Ingredient[]>>,
   currentUser: User,
+  users: User[],
   hasPermission: (p: string) => boolean,
-  companyInfo: CompanyInfo
-}> = ({ products, setProducts, sales, setSales, currentUser, hasPermission, companyInfo }) => {
+  companyInfo: CompanyInfo,
+  isOnline: boolean
+}> = ({ products, setProducts, sales, setSales, currentUser, users, hasPermission, companyInfo, isOnline }) => {
   const [cart, setCart] = useState<SaleItem[]>([]);
   const [showReceipt, setShowReceipt] = useState<Sale | null>(null);
   const [activeSubTab, setActiveSubTab] = useState<'pos' | 'history'>('pos');
+  const [authModal, setAuthModal] = useState<{ isOpen: boolean, sale: Sale | null }>({ isOpen: false, sale: null });
+  const [authData, setAuthData] = useState({ username: '', password: '' });
+  const [authError, setAuthError] = useState('');
+  const [notification, setNotification] = useState<{ message: string, type: 'success' | 'error' } | null>(null);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [confirmModal, setConfirmModal] = useState<{ isOpen: boolean, sale: Sale | null }>({ isOpen: false, sale: null });
+  const [discountModal, setDiscountModal] = useState<{
+    isOpen: boolean;
+    type: 'item' | 'total';
+    itemId?: string;
+    value: string;
+  }>({ isOpen: false, type: 'total', value: '' });
+  const [globalDiscount, setGlobalDiscount] = useState(0);
+
+  useEffect(() => {
+    if (notification) {
+      const timer = setTimeout(() => setNotification(null), 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [notification]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -1828,7 +1962,7 @@ const SalesPOS: React.FC<{
 
   const addToCart = (product: Product) => {
     if (product.stock <= 0) {
-      alert('Sem estoque!');
+      setNotification({ message: 'Sem estoque!', type: 'error' });
       return;
     }
     const existing = cart.find(item => item.productId === product.id);
@@ -1844,62 +1978,271 @@ const SalesPOS: React.FC<{
   };
 
   const completeSale = async () => {
+    if (isProcessing) return;
     if (cart.length === 0) {
-      alert('O carrinho está vazio!');
+      setNotification({ message: 'O carrinho está vazio!', type: 'error' });
       return;
     }
+
+    setIsProcessing(true);
     
-    const total = cart.reduce((acc, item) => acc + (item.price * item.quantity), 0);
-    const newSale: Sale = {
-      id: Math.random().toString(36).substr(2, 9),
-      items: [...cart],
-      total,
-      timestamp: new Date().toISOString(),
-      paymentMethod: 'Dinheiro',
-      sellerName: currentUser.username
-    };
+    try {
+      const subtotal = cart.reduce((acc, item) => acc + (item.price * item.quantity), 0);
+      const itemDiscounts = cart.reduce((acc, item) => acc + (item.discount || 0), 0);
+      const total = subtotal - itemDiscounts - globalDiscount;
 
-    // 1. Atualizar Estado + LocalStorage (IMEDIATO)
-    // Vendas
-    const updatedSales = [...sales, newSale];
-    setSales(updatedSales);
-    saveToLocal('sales', updatedSales);
+      const newSale: Sale = {
+        id: Math.random().toString(36).substr(2, 9),
+        items: [...cart],
+        subtotal,
+        discount: itemDiscounts + globalDiscount,
+        total: Math.max(0, total),
+        timestamp: new Date().toISOString(),
+        paymentMethod: 'Dinheiro',
+        sellerName: currentUser.username,
+        status: 'active'
+      };
 
-    // Estoque
-    const updatedProducts = products.map(p => {
-      const cartItem = cart.find(ci => ci.productId === p.id);
-      return cartItem ? { ...p, stock: p.stock - cartItem.quantity } : p;
-    });
-    setProducts(updatedProducts);
-    saveToLocal('products', updatedProducts);
+      // 1. Sincronização com Supabase (se online)
+      let finalProducts = [...products];
+      if (isOnline) {
+        // Buscar estoque atualizado do servidor para evitar conflitos
+        const productIds = cart.map(i => i.productId);
+        const { data: serverProducts, error: fetchError } = await supabase
+          .from('products')
+          .select('id, stock')
+          .in('id', productIds);
 
-    // 2. Sincronizar com Supabase (ASSÍNCRONO)
-    // Converter para snake_case e tratar o array de itens como JSON
-    const snakeSale = toSnakeCase({
-      ...newSale,
-      items: newSale.items // Supabase lida com JSONB se configurado
-    });
+        if (fetchError) throw new Error('Erro ao verificar estoque no servidor.');
 
-    supabase.from('sales').insert(snakeSale).then(({ error }) => {
-      if (error) console.error('Erro ao sincronizar venda:', error);
-    });
+        // Validar estoque no servidor
+        for (const item of cart) {
+          const serverProd = serverProducts?.find(sp => sp.id === item.productId);
+          if (serverProd && serverProd.stock < item.quantity) {
+            throw new Error(`Estoque insuficiente para ${item.productName} no servidor.`);
+          }
+        }
 
-    // Sincronizar estoque de cada produto
-    cart.forEach(item => {
-      const product = products.find(p => p.id === item.productId);
-      if (product) {
-        supabase.from('products').update({ stock: product.stock - item.quantity }).eq('id', item.productId).then(({ error }) => {
-          if (error) console.error(`Erro ao sincronizar estoque do produto ${item.productId}:`, error);
+        // Registrar venda no Supabase
+        const snakeSale = toSnakeCase({
+          ...newSale,
+          items: newSale.items
+        });
+        const { error: saleError } = await supabase.from('sales').insert([snakeSale]);
+        if (saleError) throw saleError;
+
+        // Atualizar estoques no Supabase (em paralelo)
+        const productUpdatePromises = cart.map(item => {
+          const localProd = products.find(p => p.id === item.productId);
+          const serverProd = serverProducts?.find(sp => sp.id === item.productId);
+          const currentStock = serverProd ? serverProd.stock : (localProd?.stock || 0);
+          const newStock = currentStock - item.quantity;
+          
+          // Atualizar estado local para refletir o novo estoque calculado com base no servidor
+          finalProducts = finalProducts.map(p => p.id === item.productId ? { ...p, stock: newStock } : p);
+          
+          return supabase.from('products').update({ stock: newStock }).eq('id', item.productId);
+        });
+
+        const results = await Promise.all(productUpdatePromises);
+        const firstError = results.find(r => r.error)?.error;
+        if (firstError) throw firstError;
+      } else {
+        // Modo Offline: Apenas atualizar estado local
+        finalProducts = products.map(p => {
+          const cartItem = cart.find(ci => ci.productId === p.id);
+          return cartItem ? { ...p, stock: p.stock - cartItem.quantity } : p;
         });
       }
-    });
 
-    setShowReceipt(newSale);
-    setCart([]);
+      // 2. Atualizar Estado Local + LocalStorage
+      const updatedSales = [...sales, newSale];
+      setSales(updatedSales);
+      saveToLocal('sales', updatedSales);
+      setProducts(finalProducts);
+      saveToLocal('products', finalProducts);
+
+      setShowReceipt(newSale);
+      setCart([]);
+      setGlobalDiscount(0);
+      setNotification({ message: 'Venda realizada com sucesso!', type: 'success' });
+    } catch (error: any) {
+      console.error('Erro ao finalizar venda:', error);
+      setNotification({ 
+        message: `Erro: ${error.message || 'Falha na sincronização.'}`, 
+        type: 'error' 
+      });
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
+  const voidSale = async (sale: Sale, authenticated = false, confirmed = false) => {
+    if (isProcessing) return;
+
+    if (!confirmed) {
+      setConfirmModal({ isOpen: true, sale });
+      return;
+    }
+
+    if (!authenticated) {
+      setAuthModal({ isOpen: true, sale });
+      setAuthData({ username: '', password: '' });
+      setAuthError('');
+      return;
+    }
+
+    if (sale.status === 'voided') {
+      setNotification({ message: 'Esta venda já foi anulada!', type: 'error' });
+      return;
+    }
+
+    setIsProcessing(true);
+
+    try {
+      // 1. Sincronização com Supabase (se online)
+      let finalProducts = [...products];
+      if (isOnline) {
+        // Verificar se a venda já foi anulada no servidor
+        const { data: serverSale, error: saleFetchError } = await supabase
+          .from('sales')
+          .select('status')
+          .eq('id', sale.id)
+          .single();
+
+        if (saleFetchError) throw new Error('Erro ao verificar status da venda no servidor.');
+        if (serverSale?.status === 'voided') {
+          throw new Error('Esta venda já foi anulada no servidor.');
+        }
+
+        // Buscar estoque atualizado do servidor
+        const productIds = sale.items.map(i => i.productId);
+        const { data: serverProducts, error: prodFetchError } = await supabase
+          .from('products')
+          .select('id, stock')
+          .in('id', productIds);
+
+        if (prodFetchError) throw new Error('Erro ao buscar estoque atualizado do servidor.');
+
+        // Atualizar status da venda no Supabase
+        const { error: saleUpdateError } = await supabase
+          .from('sales')
+          .update({ status: 'voided' })
+          .eq('id', sale.id);
+
+        if (saleUpdateError) throw saleUpdateError;
+
+        // Restaurar estoques no Supabase (em paralelo)
+        const productUpdatePromises = sale.items.map(item => {
+          const localProd = products.find(p => p.id === item.productId);
+          const serverProd = serverProducts?.find(sp => sp.id === item.productId);
+          const currentStock = serverProd ? serverProd.stock : (localProd?.stock || 0);
+          const newStock = currentStock + item.quantity;
+
+          finalProducts = finalProducts.map(p => p.id === item.productId ? { ...p, stock: newStock } : p);
+
+          return supabase.from('products').update({ stock: newStock }).eq('id', item.productId);
+        });
+
+        const results = await Promise.all(productUpdatePromises);
+        const firstError = results.find(r => r.error)?.error;
+        if (firstError) throw firstError;
+      } else {
+        // Modo Offline
+        finalProducts = products.map(p => {
+          const saleItem = sale.items.find(si => si.productId === p.id);
+          return saleItem ? { ...p, stock: p.stock + saleItem.quantity } : p;
+        });
+      }
+
+      // 2. Atualizar Estado Local + LocalStorage
+      const updatedSales = sales.map(s => s.id === sale.id ? { ...s, status: 'voided' as const } : s);
+      setSales(updatedSales);
+      saveToLocal('sales', updatedSales);
+      setProducts(finalProducts);
+      saveToLocal('products', finalProducts);
+
+      setNotification({ message: 'Venda anulada e estoque restaurado com sucesso!', type: 'success' });
+    } catch (error: any) {
+      console.error('Erro ao anular venda:', error);
+      setNotification({ 
+        message: `Erro: ${error.message || 'Falha na sincronização.'}`, 
+        type: 'error' 
+      });
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleAuthVoid = () => {
+    const admin = users.find(u => u.username === authData.username && u.password === authData.password && u.role === UserRole.ADMIN);
+    if (admin) {
+      if (authModal.sale) {
+        voidSale(authModal.sale, true, true);
+        setAuthModal({ isOpen: false, sale: null });
+      }
+    } else {
+      setAuthError('Credenciais de administrador inválidas.');
+    }
+  };
+
+  const handleApplyDiscount = () => {
+    const admin = users.find(u => u.username === authData.username && u.password === authData.password && u.role === UserRole.ADMIN);
+    if (!admin) {
+      setAuthError('Credenciais de administrador inválidas.');
+      return;
+    }
+
+    const discountValue = parseFloat(discountModal.value) || 0;
+    if (discountValue < 0) {
+      setAuthError('O desconto não pode ser negativo.');
+      return;
+    }
+
+    if (discountModal.type === 'item' && discountModal.itemId) {
+      setCart(cart.map(item => {
+        if (item.productId === discountModal.itemId) {
+          const itemTotal = item.price * item.quantity;
+          if (discountValue > itemTotal) {
+            setAuthError('Desconto maior que o valor do item.');
+            return item;
+          }
+          return { ...item, discount: discountValue };
+        }
+        return item;
+      }));
+    } else if (discountModal.type === 'total') {
+      const subtotal = cart.reduce((acc, item) => acc + (item.price * item.quantity), 0);
+      const itemDiscounts = cart.reduce((acc, item) => acc + (item.discount || 0), 0);
+      if (discountValue > (subtotal - itemDiscounts)) {
+        setAuthError('Desconto maior que o total da venda.');
+        return;
+      }
+      setGlobalDiscount(discountValue);
+    }
+
+    setDiscountModal({ ...discountModal, isOpen: false });
+    setAuthData({ username: '', password: '' });
+    setAuthError('');
+    setNotification({ message: 'Desconto aplicado com sucesso!', type: 'success' });
+  };
+
+  const subtotal = cart.reduce((acc, i) => acc + (i.price * i.quantity), 0);
+  const totalItemDiscounts = cart.reduce((acc, i) => acc + (i.discount || 0), 0);
+  const finalTotal = Math.max(0, subtotal - totalItemDiscounts - globalDiscount);
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 relative">
+      {/* Notification Toast */}
+      {notification && (
+        <div className={`fixed top-24 right-8 z-[100] p-4 rounded-2xl shadow-2xl animate-in slide-in-from-right duration-300 flex items-center gap-3 ${
+          notification.type === 'success' ? 'bg-green-600 text-white' : 'bg-red-600 text-white'
+        }`}>
+          {notification.type === 'success' ? <Save size={20} /> : <AlertTriangle size={20} />}
+          <span className="font-bold">{notification.message}</span>
+        </div>
+      )}
+
       {/* Sub-tabs */}
       <div className="flex gap-4 no-print">
         <button 
@@ -1914,14 +2257,28 @@ const SalesPOS: React.FC<{
         >
           Histórico (F3)
         </button>
-        <button 
-          onClick={() => sales.length > 0 && setShowReceipt(sales[sales.length - 1])}
-          disabled={sales.length === 0}
-          className="px-6 py-2 rounded-xl font-bold transition-all bg-white text-slate-500 border border-slate-200 hover:bg-slate-50 disabled:opacity-50 flex items-center gap-2 ml-auto"
-        >
-          <Printer size={18} />
-          Reimprimir Última Venda
-        </button>
+        <div className="ml-auto flex gap-2">
+          <button 
+            onClick={() => sales.length > 0 && voidSale(sales[sales.length - 1], currentUser.role === UserRole.ADMIN, false)}
+            disabled={sales.length === 0 || sales[sales.length - 1].status === 'voided' || isProcessing}
+            className="px-6 py-2 rounded-xl font-bold transition-all bg-white text-red-500 border border-slate-200 hover:bg-red-50 disabled:opacity-50 flex items-center gap-2"
+          >
+            {isProcessing ? (
+              <div className="w-4 h-4 border-2 border-red-500 border-t-transparent rounded-full animate-spin" />
+            ) : (
+              <XCircle size={18} />
+            )}
+            Anular Última Venda
+          </button>
+          <button 
+            onClick={() => sales.length > 0 && setShowReceipt(sales[sales.length - 1])}
+            disabled={sales.length === 0}
+            className="px-6 py-2 rounded-xl font-bold transition-all bg-white text-slate-500 border border-slate-200 hover:bg-slate-50 disabled:opacity-50 flex items-center gap-2"
+          >
+            <Printer size={18} />
+            Reimprimir Última Venda
+          </button>
+        </div>
       </div>
 
       {activeSubTab === 'pos' ? (
@@ -1969,9 +2326,20 @@ const SalesPOS: React.FC<{
                   <div className="flex-1">
                     <p className="font-bold text-slate-800 text-sm">{item.productName}</p>
                     <p className="text-xs text-slate-500">{item.quantity}x {item.price.toLocaleString()} Kz</p>
+                    {item.discount && item.discount > 0 && (
+                      <p className="text-[10px] text-green-600 font-bold">- {item.discount.toLocaleString()} Kz (Desconto)</p>
+                    )}
                   </div>
                   <div className="flex items-center gap-3">
-                    <span className="font-bold text-slate-800">{(item.price * item.quantity).toLocaleString()} Kz</span>
+                    <div className="text-right">
+                      <span className="font-bold text-slate-800 block">{(item.price * item.quantity - (item.discount || 0)).toLocaleString()} Kz</span>
+                      <button 
+                        onClick={() => setDiscountModal({ isOpen: true, type: 'item', itemId: item.productId, value: item.discount?.toString() || '' })}
+                        className="text-[10px] text-amber-600 hover:underline"
+                      >
+                        Desconto
+                      </button>
+                    </div>
                     <button onClick={() => removeFromCart(item.productId)} className="text-red-300 hover:text-red-500">
                       <Trash2 size={16} />
                     </button>
@@ -1986,18 +2354,50 @@ const SalesPOS: React.FC<{
               )}
             </div>
             <div className="p-6 bg-slate-50/50 rounded-b-3xl border-t border-slate-100">
-              <div className="flex justify-between items-end mb-6">
-                <span className="text-slate-400 text-xs font-bold uppercase">Total a Pagar</span>
-                <span className="text-2xl font-black text-slate-800">
-                  {cart.reduce((acc, i) => acc + (i.price * i.quantity), 0).toLocaleString()} Kz
-                </span>
+              <div className="space-y-2 mb-6">
+                <div className="flex justify-between items-center text-slate-500 text-xs">
+                  <span>Subtotal</span>
+                  <span>{subtotal.toLocaleString()} Kz</span>
+                </div>
+                {(totalItemDiscounts > 0 || globalDiscount > 0) && (
+                  <div className="flex justify-between items-center text-green-600 text-xs font-bold">
+                    <div className="flex items-center gap-1">
+                      <span>Descontos</span>
+                      <button 
+                        onClick={() => setDiscountModal({ isOpen: true, type: 'total', value: globalDiscount.toString() })}
+                        className="text-[10px] hover:underline"
+                      >
+                        (Editar)
+                      </button>
+                    </div>
+                    <span>- {(totalItemDiscounts + globalDiscount).toLocaleString()} Kz</span>
+                  </div>
+                )}
+                {cart.length > 0 && globalDiscount === 0 && (
+                  <button 
+                    onClick={() => setDiscountModal({ isOpen: true, type: 'total', value: '' })}
+                    className="text-[10px] text-amber-600 hover:underline block"
+                  >
+                    Aplicar Desconto Total
+                  </button>
+                )}
+                <div className="flex justify-between items-end pt-2 border-t border-slate-100">
+                  <span className="text-slate-400 text-xs font-bold uppercase">Total a Pagar</span>
+                  <span className="text-2xl font-black text-slate-800">
+                    {finalTotal.toLocaleString()} Kz
+                  </span>
+                </div>
               </div>
               <button 
                 onClick={completeSale}
-                disabled={cart.length === 0}
+                disabled={cart.length === 0 || isProcessing}
                 className="w-full bg-amber-600 text-white font-bold py-4 rounded-2xl shadow-lg shadow-amber-200 hover:bg-amber-700 transition-all active:scale-95 disabled:opacity-50 flex flex-col items-center"
               >
-                <span>Finalizar Compra</span>
+                {isProcessing ? (
+                  <div className="w-6 h-6 border-2 border-white border-t-transparent rounded-full animate-spin mb-1" />
+                ) : (
+                  <span>Finalizar Compra</span>
+                )}
                 <span className="text-[10px] opacity-60 font-normal">Atalho: F9 ou Enter</span>
               </button>
             </div>
@@ -2022,9 +2422,14 @@ const SalesPOS: React.FC<{
               </thead>
               <tbody className="text-sm divide-y divide-slate-50">
                 {[...sales].reverse().map(sale => (
-                  <tr key={sale.id} className="hover:bg-slate-50/50 transition-colors group">
+                  <tr key={sale.id} className={`hover:bg-slate-50/50 transition-colors group ${sale.status === 'voided' ? 'opacity-50 grayscale' : ''}`}>
                     <td className="p-6">
-                      <p className="font-bold text-slate-800">#{sale.id}</p>
+                      <div className="flex items-center gap-2">
+                        <p className="font-bold text-slate-800">#{sale.id}</p>
+                        {sale.status === 'voided' && (
+                          <span className="px-2 py-0.5 bg-red-100 text-red-600 rounded text-[8px] font-black uppercase">Anulada</span>
+                        )}
+                      </div>
                       <p className="text-xs text-slate-400">{new Date(sale.timestamp).toLocaleString()}</p>
                     </td>
                     <td className="p-6">
@@ -2049,17 +2454,34 @@ const SalesPOS: React.FC<{
                         {sale.paymentMethod}
                       </span>
                     </td>
-                    <td className="p-6 text-right font-black text-slate-800">
-                      {sale.total.toLocaleString()} Kz
+                    <td className="p-6 text-right">
+                      <div className="flex flex-col items-end">
+                        <span className="font-black text-slate-800">{sale.total.toLocaleString()} Kz</span>
+                        {sale.discount && sale.discount > 0 && (
+                          <span className="text-[10px] text-green-600 font-bold">Desc: -{sale.discount.toLocaleString()} Kz</span>
+                        )}
+                      </div>
                     </td>
                     <td className="p-6 text-center">
-                      <button 
-                        onClick={() => setShowReceipt(sale)}
-                        className="p-2 text-amber-600 hover:bg-amber-50 rounded-lg transition-colors"
-                        title="Ver Recibo"
-                      >
-                        <Printer size={18} />
-                      </button>
+                      <div className="flex items-center justify-center gap-2">
+                        <button 
+                          onClick={() => setShowReceipt(sale)}
+                          className="p-2 text-amber-600 hover:bg-amber-50 rounded-lg transition-colors"
+                          title="Ver Recibo"
+                        >
+                          <Printer size={18} />
+                        </button>
+                        {sale.status !== 'voided' && (
+                          <button 
+                            onClick={() => voidSale(sale, currentUser.role === UserRole.ADMIN, false)}
+                            disabled={isProcessing}
+                            className="p-2 text-red-400 hover:bg-red-50 hover:text-red-600 rounded-lg transition-colors disabled:opacity-50"
+                            title="Anular Venda"
+                          >
+                            <XCircle size={18} />
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -2074,6 +2496,170 @@ const SalesPOS: React.FC<{
         </div>
       )}
 
+      {/* Confirmation Modal for Voiding */}
+      {confirmModal.isOpen && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md p-8 animate-in zoom-in duration-200">
+            <div className="flex justify-between items-center mb-6">
+              <h3 className="text-xl font-bold text-slate-800 flex items-center gap-2">
+                <AlertTriangle size={24} className="text-amber-500" />
+                Confirmar Anulação
+              </h3>
+              <button onClick={() => setConfirmModal({ isOpen: false, sale: null })} className="text-slate-400 hover:text-slate-600">
+                <ChevronDown size={24} />
+              </button>
+            </div>
+            <div className="space-y-4">
+              <p className="text-slate-600 text-sm">
+                Tem certeza que deseja anular a venda <span className="font-bold text-slate-800">#{confirmModal.sale?.id}</span>?
+              </p>
+              <div className="bg-slate-50 p-4 rounded-2xl">
+                <p className="text-xs font-bold text-slate-400 uppercase mb-2">Detalhes da Venda</p>
+                <p className="text-sm font-bold text-slate-800">{confirmModal.sale?.total.toLocaleString()} Kz</p>
+                <p className="text-[10px] text-slate-500">{confirmModal.sale?.items.length} itens • {confirmModal.sale?.sellerName}</p>
+              </div>
+              <div className="flex gap-3 pt-4">
+                <button 
+                  onClick={() => setConfirmModal({ isOpen: false, sale: null })}
+                  className="flex-1 px-6 py-4 rounded-2xl font-bold text-slate-500 bg-slate-100 hover:bg-slate-200 transition-all"
+                >
+                  Cancelar
+                </button>
+                <button 
+                  onClick={() => {
+                    if (confirmModal.sale) {
+                      voidSale(confirmModal.sale, currentUser.role === UserRole.ADMIN, true);
+                      setConfirmModal({ isOpen: false, sale: null });
+                    }
+                  }}
+                  className="flex-1 px-6 py-4 rounded-2xl font-bold text-white bg-red-600 shadow-lg shadow-red-200 hover:bg-red-700 transition-all"
+                >
+                  Confirmar
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Auth Modal for Voiding */}
+      {authModal.isOpen && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md p-8 animate-in zoom-in duration-200">
+            <div className="flex justify-between items-center mb-6">
+              <h3 className="text-xl font-bold text-slate-800 flex items-center gap-2">
+                <XCircle size={24} className="text-red-500" />
+                Autorização de Anulação
+              </h3>
+              <button onClick={() => setAuthModal({ isOpen: false, sale: null })} className="text-slate-400 hover:text-slate-600">
+                <ChevronDown size={24} />
+              </button>
+            </div>
+            <p className="text-slate-500 text-sm mb-6">
+              Esta ação requer privilégios de administrador. Por favor, insira as credenciais.
+            </p>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-400 uppercase mb-2">Utilizador Admin</label>
+                <input 
+                  type="text"
+                  value={authData.username}
+                  onChange={(e) => setAuthData({ ...authData, username: e.target.value })}
+                  className="w-full bg-slate-50 border border-slate-100 p-4 rounded-2xl focus:outline-none focus:border-amber-500"
+                  placeholder="Nome de utilizador"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-400 uppercase mb-2">Palavra-passe</label>
+                <input 
+                  type="password"
+                  value={authData.password}
+                  onChange={(e) => setAuthData({ ...authData, password: e.target.value })}
+                  className="w-full bg-slate-50 border border-slate-100 p-4 rounded-2xl focus:outline-none focus:border-amber-500"
+                  placeholder="••••••••"
+                  onKeyDown={(e) => e.key === 'Enter' && handleAuthVoid()}
+                />
+              </div>
+              {authError && <p className="text-red-500 text-xs font-bold">{authError}</p>}
+              <button 
+                onClick={handleAuthVoid}
+                className="w-full bg-red-600 text-white font-bold py-4 rounded-2xl shadow-lg shadow-red-200 hover:bg-red-700 transition-all"
+              >
+                Confirmar Anulação
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Discount Modal */}
+      {discountModal.isOpen && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md p-8 animate-in zoom-in duration-200">
+            <div className="flex justify-between items-center mb-6">
+              <h3 className="text-xl font-bold text-slate-800 flex items-center gap-2">
+                <Wallet size={24} className="text-amber-500" />
+                Aplicar Desconto {discountModal.type === 'item' ? 'por Item' : 'Total'}
+              </h3>
+              <button onClick={() => {
+                setDiscountModal({ ...discountModal, isOpen: false });
+                setAuthData({ username: '', password: '' });
+                setAuthError('');
+              }} className="text-slate-400 hover:text-slate-600">
+                <ChevronDown size={24} />
+              </button>
+            </div>
+            
+            <div className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-400 uppercase mb-2">Valor do Desconto (Kz)</label>
+                <input 
+                  type="number"
+                  value={discountModal.value}
+                  onChange={(e) => setDiscountModal({ ...discountModal, value: e.target.value })}
+                  className="w-full bg-slate-50 border border-slate-100 p-4 rounded-2xl focus:outline-none focus:border-amber-500"
+                  placeholder="0"
+                />
+              </div>
+
+              <div className="pt-4 border-t border-slate-100">
+                <p className="text-[10px] font-bold text-slate-400 uppercase mb-4">Autorização do Administrador</p>
+                <div className="space-y-4">
+                  <div>
+                    <input 
+                      type="text"
+                      value={authData.username}
+                      onChange={(e) => setAuthData({ ...authData, username: e.target.value })}
+                      className="w-full bg-slate-50 border border-slate-100 p-4 rounded-2xl focus:outline-none focus:border-amber-500"
+                      placeholder="Utilizador Admin"
+                    />
+                  </div>
+                  <div>
+                    <input 
+                      type="password"
+                      value={authData.password}
+                      onChange={(e) => setAuthData({ ...authData, password: e.target.value })}
+                      className="w-full bg-slate-50 border border-slate-100 p-4 rounded-2xl focus:outline-none focus:border-amber-500"
+                      placeholder="Palavra-passe"
+                      onKeyDown={(e) => e.key === 'Enter' && handleApplyDiscount()}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {authError && <p className="text-red-500 text-xs font-bold">{authError}</p>}
+              
+              <button 
+                onClick={handleApplyDiscount}
+                className="w-full bg-amber-600 text-white font-bold py-4 rounded-2xl shadow-lg shadow-amber-200 hover:bg-amber-700 transition-all"
+              >
+                Aplicar Desconto
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Receipt Modal */}
       {showReceipt && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto">
@@ -2084,6 +2670,8 @@ const SalesPOS: React.FC<{
                 date={showReceipt.timestamp}
                 service={showReceipt.items.map(i => `${i.quantity}x ${i.productName}`).join(', ')}
                 amountKz={showReceipt.total}
+                subtotal={showReceipt.subtotal}
+                discount={showReceipt.discount}
                 transactionId={showReceipt.id}
                 companyInfo={companyInfo}
                 onClose={() => setShowReceipt(null)}
@@ -2147,7 +2735,8 @@ const FinanceManager: React.FC<{
     }
   };
 
-  const totalSales = sales.reduce((acc, s) => acc + s.total, 0);
+  const activeSales = useMemo(() => sales.filter(s => s.status !== 'voided'), [sales]);
+  const totalSales = activeSales.reduce((acc, s) => acc + s.total, 0);
   const totalSalaries = salaryPayments.reduce((acc, s) => acc + s.amount, 0);
   const totalExpenses = expenses.reduce((acc, e) => acc + e.amount, 0);
 
@@ -2604,6 +3193,60 @@ const ReportsManager: React.FC<{
 }> = ({ productionLogs, products, ingredients }) => {
   const [period, setPeriod] = useState<'weekly' | 'monthly' | 'yearly'>('monthly');
 
+  const downloadCSV = (content: string, filename: string) => {
+    const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', filename);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const exportProductionCSV = () => {
+    const headers = ['Data', 'Produto', 'Quantidade', 'Vendedor'];
+    const data = filteredLogs.map(log => ({
+      'Data': new Date(log.timestamp).toLocaleString(),
+      'Produto': log.productName,
+      'Quantidade': log.quantity,
+      'Vendedor': log.sellerName
+    }));
+    
+    const csvContent = [
+      headers.join(','),
+      ...data.map(row => [
+        `"${row.Data}"`,
+        `"${row.Produto}"`,
+        `"${row.Quantidade}"`,
+        `"${row.Vendedor}"`
+      ].join(','))
+    ].join('\n');
+    
+    downloadCSV(csvContent, `producao_${period}_${new Date().toISOString().split('T')[0]}.csv`);
+  };
+
+  const exportIngredientsCSV = () => {
+    const headers = ['Insumo', 'Quantidade Usada', 'Unidade'];
+    const data = ingredientStats.map(ing => ({
+      'Insumo': ing.name,
+      'Quantidade Usada': ing.amount.toFixed(2),
+      'Unidade': ing.unit
+    }));
+    
+    const csvContent = [
+      headers.join(','),
+      ...data.map(row => [
+        `"${row.Insumo}"`,
+        `"${row['Quantidade Usada']}"`,
+        `"${row.Unidade}"`
+      ].join(','))
+    ].join('\n');
+    
+    downloadCSV(csvContent, `consumo_insumos_${period}_${new Date().toISOString().split('T')[0]}.csv`);
+  };
+
   const filteredLogs = useMemo(() => {
     const now = new Date();
     return productionLogs.filter(log => {
@@ -2657,20 +3300,38 @@ const ReportsManager: React.FC<{
           </h3>
           <p className="text-slate-500 text-sm">Acompanhe o desempenho e o consumo de insumos.</p>
         </div>
-        <div className="flex bg-slate-100 p-1 rounded-xl">
-          {(['weekly', 'monthly', 'yearly'] as const).map((p) => (
-            <button
-              key={p}
-              onClick={() => setPeriod(p)}
-              className={`px-4 py-2 rounded-lg text-xs font-bold uppercase transition-all ${
-                period === p 
-                  ? 'bg-white text-amber-600 shadow-sm' 
-                  : 'text-slate-500 hover:text-slate-700'
-              }`}
+        <div className="flex flex-wrap gap-4 items-center">
+          <div className="flex bg-slate-100 p-1 rounded-xl">
+            {(['weekly', 'monthly', 'yearly'] as const).map((p) => (
+              <button
+                key={p}
+                onClick={() => setPeriod(p)}
+                className={`px-4 py-2 rounded-lg text-xs font-bold uppercase transition-all ${
+                  period === p 
+                    ? 'bg-white text-amber-600 shadow-sm' 
+                    : 'text-slate-500 hover:text-slate-700'
+                }`}
+              >
+                {p === 'weekly' ? 'Semanal' : p === 'monthly' ? 'Mensal' : 'Anual'}
+              </button>
+            ))}
+          </div>
+          <div className="flex gap-2">
+            <button 
+              onClick={exportProductionCSV}
+              className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 text-slate-600 rounded-xl text-xs font-bold hover:bg-slate-50 transition-all shadow-sm active:scale-95"
+              title="Exportar Produção para CSV"
             >
-              {p === 'weekly' ? 'Semanal' : p === 'monthly' ? 'Mensal' : 'Anual'}
+              <Download size={14} /> Produção
             </button>
-          ))}
+            <button 
+              onClick={exportIngredientsCSV}
+              className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 text-slate-600 rounded-xl text-xs font-bold hover:bg-slate-50 transition-all shadow-sm active:scale-95"
+              title="Exportar Insumos para CSV"
+            >
+              <Download size={14} /> Insumos
+            </button>
+          </div>
         </div>
       </div>
 

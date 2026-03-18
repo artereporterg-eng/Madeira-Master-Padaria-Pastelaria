@@ -8,6 +8,8 @@ interface InvoicePrinterProps {
   date: string;
   service: string;
   amountKz: number;
+  subtotal?: number;
+  discount?: number;
   transactionId: string;
   companyInfo: CompanyInfo;
   onClose?: () => void;
@@ -18,6 +20,8 @@ const InvoicePrinter: React.FC<InvoicePrinterProps> = ({
   date,
   service,
   amountKz,
+  subtotal,
+  discount,
   transactionId,
   companyInfo,
   onClose
@@ -83,8 +87,14 @@ const InvoicePrinter: React.FC<InvoicePrinterProps> = ({
           <div className="w-full max-w-[240px] space-y-2">
             <div className="flex justify-between text-xs">
               <span className="text-slate-500 font-bold uppercase">Subtotal</span>
-              <span className="font-bold">{amountKz.toLocaleString()} Kz</span>
+              <span className="font-bold">{(subtotal || amountKz).toLocaleString()} Kz</span>
             </div>
+            {discount && discount > 0 && (
+              <div className="flex justify-between text-xs text-green-600">
+                <span className="text-slate-500 font-bold uppercase">Desconto</span>
+                <span className="font-bold">- {discount.toLocaleString()} Kz</span>
+              </div>
+            )}
             <div className="flex justify-between text-xs">
               <span className="text-slate-500 font-bold uppercase">Imposto (0%)</span>
               <span className="font-bold">0 Kz</span>

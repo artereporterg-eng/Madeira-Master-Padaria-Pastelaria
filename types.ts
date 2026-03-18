@@ -40,6 +40,7 @@ export interface SalaryPayment {
   amount: number;
   date: string;
   month: string;
+  proof?: string; // base64 or URL
 }
 
 export interface Expense {
@@ -67,6 +68,7 @@ export interface Product {
   image?: string;
   createdAt: string;
   recipe: { ingredientId: string; amount: number }[];
+  recipeYield: number; // How many units the recipe produces
 }
 
 export interface SaleItem {
@@ -74,15 +76,19 @@ export interface SaleItem {
   productName: string;
   quantity: number;
   price: number;
+  discount?: number;
 }
 
 export interface Sale {
   id: string;
   items: SaleItem[];
+  subtotal: number;
+  discount: number;
   total: number;
   timestamp: string;
   paymentMethod: string;
   sellerName: string;
+  status?: 'active' | 'voided';
 }
 
 export interface ProductionLog {
