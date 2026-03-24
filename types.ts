@@ -98,6 +98,7 @@ export interface ProductionLog {
   quantity: number;
   timestamp: string;
   ingredientsUsed: { ingredientId: string; ingredientName: string; amount: number; unit: string }[];
+  sellerName?: string;
 }
 
 export interface AppState {

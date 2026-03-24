@@ -11,6 +11,7 @@ interface InvoicePrinterProps {
   subtotal?: number;
   discount?: number;
   transactionId: string;
+  paymentMethod?: string;
   companyInfo: CompanyInfo;
   onClose?: () => void;
 }
@@ -23,6 +24,7 @@ const InvoicePrinter: React.FC<InvoicePrinterProps> = ({
   subtotal,
   discount,
   transactionId,
+  paymentMethod,
   companyInfo,
   onClose
 }) => {
@@ -73,7 +75,9 @@ const InvoicePrinter: React.FC<InvoicePrinterProps> = ({
             <tr className="border-b border-slate-100">
               <td className="py-4">
                 <p className="text-sm font-bold text-slate-800">{service}</p>
-                <p className="text-[10px] text-slate-400 mt-0.5">Transação via MCX/Stripe</p>
+                <p className="text-[10px] text-slate-400 mt-0.5">
+                  {paymentMethod ? `Pagamento via ${paymentMethod}` : 'Transação via MCX/Stripe'}
+                </p>
               </td>
               <td className="py-4 text-right text-sm font-bold text-slate-800">
                 {amountKz.toLocaleString()} Kz

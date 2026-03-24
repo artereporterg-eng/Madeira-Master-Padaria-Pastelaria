@@ -42,6 +42,8 @@ import {
   Pie,
   Cell
 } from 'recharts';
+import { jsPDF } from 'jspdf';
+import autoTable from 'jspdf-autotable';
 import { 
   User, UserRole, Employee, EmployeeCategory, 
   SalaryPayment, Expense, Ingredient, Product, Sale, SaleItem, ProductionLog, CompanyInfo 
@@ -70,8 +72,71 @@ const ROLE_PERMISSIONS: Record<UserRole, string[]> = {
 };
 
 // --- Sincronização Offline-First ---
+const compressImage = (base64Str: string, maxWidth: number = 800, maxHeight: number = 800): Promise<string> => {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.src = base64Str;
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      let width = img.width;
+      let height = img.height;
+
+      if (width > height) {
+        if (width > maxWidth) {
+          height *= maxWidth / width;
+          width = maxWidth;
+        }
+      } else {
+        if (height > maxHeight) {
+          width *= maxHeight / height;
+          height = maxHeight;
+        }
+      }
+
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      ctx?.drawImage(img, 0, 0, width, height);
+      resolve(canvas.toDataURL('image/jpeg', 0.7)); // Compress to JPEG with 70% quality
+    };
+    img.onerror = () => resolve(base64Str); // Fallback to original if error
+  });
+};
+
 const saveToLocal = (key: string, data: any) => {
-  localStorage.setItem(key, JSON.stringify(data));
+  try {
+    localStorage.setItem(key, JSON.stringify(data));
+  } catch (e) {
+    if (e instanceof DOMException && (e.name === 'QuotaExceededError' || e.name === 'NS_ERROR_DOM_QUOTA_REACHED')) {
+      console.warn(`LocalStorage quota exceeded for key "${key}". Attempting recovery...`);
+      
+      if (key === 'products' && Array.isArray(data)) {
+        // If products are too large, try saving without images as a fallback
+        const dataWithoutImages = data.map(p => ({ ...p, image: undefined }));
+        try {
+          localStorage.setItem(key, JSON.stringify(dataWithoutImages));
+          console.info('Saved products without images to local storage to stay within quota.');
+          return;
+        } catch (innerError) {
+          console.error('Failed to save even without images:', innerError);
+        }
+      }
+      
+      // If it's still failing or it's another key, try clearing some old logs
+      try {
+        const keysToRemove = ['production_logs', 'sales', 'expenses'];
+        keysToRemove.forEach(k => {
+          if (k !== key) localStorage.removeItem(k);
+        });
+        localStorage.setItem(key, JSON.stringify(data));
+        console.info('Cleared other keys to make room for ' + key);
+      } catch (finalError) {
+        console.error('Final attempt to save to LocalStorage failed:', finalError);
+      }
+    } else {
+      console.error('Error saving to LocalStorage:', e);
+    }
+  }
 };
 
 const App: React.FC = () => {
@@ -411,6 +476,7 @@ const App: React.FC = () => {
             productionLogs={productionLogs}
             setProductionLogs={setProductionLogs}
             hasPermission={hasPermission}
+            currentUser={user}
           />
         )}
         {activeTab === 'finance' && (
@@ -428,6 +494,7 @@ const App: React.FC = () => {
             productionLogs={productionLogs}
             products={products}
             ingredients={ingredients}
+            companyInfo={companyInfo}
           />
         )}
         {activeTab === 'settings' && (
@@ -1038,8 +1105,9 @@ const InventoryManager: React.FC<{
   setProducts: React.Dispatch<React.SetStateAction<Product[]>>,
   productionLogs: ProductionLog[],
   setProductionLogs: React.Dispatch<React.SetStateAction<ProductionLog[]>>,
-  hasPermission: (p: string) => boolean
-}> = ({ ingredients, setIngredients, products, setProducts, productionLogs, setProductionLogs, hasPermission }) => {
+  hasPermission: (p: string) => boolean,
+  currentUser: User | null
+}> = ({ ingredients, setIngredients, products, setProducts, productionLogs, setProductionLogs, hasPermission, currentUser }) => {
   const [showAddIng, setShowAddIng] = useState(false);
   const [newIng, setNewIng] = useState<Partial<Ingredient>>({ unit: 'kg' });
   const [showAddProd, setShowAddProd] = useState(false);
@@ -1110,7 +1178,7 @@ const InventoryManager: React.FC<{
         
       const required = (r.amount / (product.recipeYield || 1)) * simQty;
       if (totalAvailable < required) {
-        missingIngredients.push(`${recipeIng.name}: Necessário ${required.toFixed(2)} ${recipeIng.unit} | Disponível ${totalAvailable.toFixed(2)} ${recipeIng.unit} | Falta ${(required - totalAvailable).toFixed(2)} ${recipeIng.unit}`);
+        missingIngredients.push(`${recipeIng.name}: Necessário ${required.toFixed(3)} ${recipeIng.unit} | Disponível ${totalAvailable.toFixed(3)} ${recipeIng.unit} | Falta ${(required - totalAvailable).toFixed(3)} ${recipeIng.unit}`);
       }
     });
 
@@ -1151,6 +1219,7 @@ const InventoryManager: React.FC<{
       productName: product.name,
       quantity: simQty,
       timestamp: new Date().toISOString(),
+      sellerName: currentUser?.username || 'Sistema',
       ingredientsUsed: product.recipe.map(r => {
         const ing = ingredients.find(i => i.id === r.ingredientId);
         return {
@@ -1288,7 +1357,7 @@ const InventoryManager: React.FC<{
             
           const required = (r.amount / yieldVal) * stockValue;
           if (totalAvailable < required) {
-            missingIngredients.push(`${recipeIng.name}: Necessário ${required.toFixed(2)} ${recipeIng.unit} | Disponível ${totalAvailable.toFixed(2)} ${recipeIng.unit} | Falta ${(required - totalAvailable).toFixed(2)} ${recipeIng.unit}`);
+            missingIngredients.push(`${recipeIng.name}: Necessário ${required.toFixed(3)} ${recipeIng.unit} | Disponível ${totalAvailable.toFixed(3)} ${recipeIng.unit} | Falta ${(required - totalAvailable).toFixed(3)} ${recipeIng.unit}`);
           }
         });
 
@@ -1323,6 +1392,7 @@ const InventoryManager: React.FC<{
           productName: newProd.name!,
           quantity: stockValue,
           timestamp: new Date().toISOString(),
+          sellerName: currentUser?.username || 'Sistema',
           ingredientsUsed: recipe.map(r => {
             const ing = ingredients.find(i => i.id === r.ingredientId);
             return {
@@ -1435,8 +1505,9 @@ const InventoryManager: React.FC<{
     const file = e.target.files?.[0];
     if (file) {
       const reader = new FileReader();
-      reader.onloadend = () => {
-        setNewProd({ ...newProd, image: reader.result as string });
+      reader.onloadend = async () => {
+        const compressed = await compressImage(reader.result as string);
+        setNewProd({ ...newProd, image: compressed });
       };
       reader.readAsDataURL(file);
     }
@@ -1454,7 +1525,7 @@ const InventoryManager: React.FC<{
           {groupedIngredients.map((group, idx) => (
             <div key={idx} className="bg-white p-4 rounded-2xl border border-amber-200 shadow-sm">
               <p className="text-[10px] font-bold text-amber-600 uppercase mb-1">{group.name}</p>
-              <p className="text-xl font-black text-slate-800">{group.total} <span className="text-sm font-normal text-slate-500">{group.unit}</span></p>
+              <p className="text-xl font-black text-slate-800">{group.total.toFixed(3)} <span className="text-sm font-normal text-slate-500">{group.unit}</span></p>
             </div>
           ))}
           {groupedIngredients.length === 0 && <p className="col-span-full text-center py-4 text-amber-600/50 italic text-sm">Nenhum insumo para totalizar.</p>}
@@ -1497,7 +1568,7 @@ const InventoryManager: React.FC<{
               {errors.ingName && <p className="text-[10px] text-red-500 mt-1 font-bold">{errors.ingName}</p>}
               {newIng.name && groupedIngredients.find(g => g.name.toLowerCase() === newIng.name?.toLowerCase()) && (
                 <p className="text-[10px] text-amber-600 font-bold mt-1 animate-pulse">
-                  Total atual em estoque: {groupedIngredients.find(g => g.name.toLowerCase() === newIng.name?.toLowerCase())?.total} {groupedIngredients.find(g => g.name.toLowerCase() === newIng.name?.toLowerCase())?.unit}
+                  Total atual em estoque: {groupedIngredients.find(g => g.name.toLowerCase() === newIng.name?.toLowerCase())?.total.toFixed(3)} {groupedIngredients.find(g => g.name.toLowerCase() === newIng.name?.toLowerCase())?.unit}
                 </p>
               )}
             </div>
@@ -1545,7 +1616,7 @@ const InventoryManager: React.FC<{
               )}
               <h5 className="font-bold text-slate-800 mb-1">{ing.name}</h5>
               <div className="flex justify-between items-center mb-2">
-                <p className="text-lg font-bold text-amber-600">{ing.quantity} {ing.unit}</p>
+                <p className="text-lg font-bold text-amber-600">{ing.quantity.toFixed(3)} {ing.unit}</p>
                 <span className={`w-2 h-2 rounded-full ${ing.quantity < 10 ? 'bg-red-500 animate-pulse' : 'bg-green-500'}`}></span>
               </div>
               <p className="text-[9px] text-slate-400 uppercase font-bold">
@@ -1690,7 +1761,7 @@ const InventoryManager: React.FC<{
                         <div key={r.ingredientId} className="flex justify-between items-center text-sm bg-white p-2 rounded-lg shadow-sm">
                           <span className="font-medium text-slate-700">{ing?.name}</span>
                           <div className="flex items-center gap-3">
-                            <span className="font-bold text-amber-600">{r.amount} {ing?.unit}</span>
+                            <span className="font-bold text-amber-600">{r.amount.toFixed(3)} {ing?.unit}</span>
                             <button onClick={() => removeRecipeItem(r.ingredientId)} className="text-red-300 hover:text-red-500">
                               <Trash2 size={14} />
                             </button>
@@ -1731,7 +1802,7 @@ const InventoryManager: React.FC<{
               </p>
               <div className="flex justify-between text-xs font-bold text-slate-400">
                 <span>ESTOQUE</span>
-                <span className={prod.stock < 20 ? 'text-red-500' : 'text-slate-700'}>{prod.stock} un.</span>
+                <span className={prod.stock < 20 ? 'text-red-500' : 'text-slate-700'}>{prod.stock.toFixed(3)} un.</span>
               </div>
               <div className="mt-2 h-1 w-full bg-slate-100 rounded-full overflow-hidden">
                 <div className={`h-full transition-all ${prod.stock < 20 ? 'bg-red-500' : 'bg-green-500'}`} style={{ width: `${Math.min(prod.stock, 100)}%` }}></div>
@@ -1845,13 +1916,13 @@ const InventoryManager: React.FC<{
                         <div key={r.ingredientId} className="flex justify-between items-center bg-slate-800 p-4 rounded-2xl border border-slate-700">
                           <div>
                             <p className="text-sm font-bold">{recipeIng.name}</p>
-                            <p className="text-[10px] text-slate-500">Total Disponível: {totalAvailable} {recipeIng.unit}</p>
+                            <p className="text-[10px] text-slate-500">Total Disponível: {totalAvailable.toFixed(3)} {recipeIng.unit}</p>
                           </div>
                           <div className="text-right">
                             <p className={`text-lg font-black ${isShort ? 'text-red-400' : 'text-green-400'}`}>
-                              {totalNeeded.toFixed(2)} {recipeIng.unit}
+                              {totalNeeded.toFixed(3)} {recipeIng.unit}
                             </p>
-                            {isShort && <p className="text-[10px] text-red-400 font-bold uppercase">Falta: {(totalNeeded - totalAvailable).toFixed(2)}</p>}
+                            {isShort && <p className="text-[10px] text-red-400 font-bold uppercase">Falta: {(totalNeeded - totalAvailable).toFixed(3)}</p>}
                           </div>
                         </div>
                       );
@@ -1911,6 +1982,8 @@ const SalesPOS: React.FC<{
     value: string;
   }>({ isOpen: false, type: 'total', value: '' });
   const [globalDiscount, setGlobalDiscount] = useState(0);
+  const [paymentMethod, setPaymentMethod] = useState<'Dinheiro' | 'Cartão de Crédito' | 'Cartão de Débito'>('Dinheiro');
+  const [paymentStatus, setPaymentStatus] = useState<'idle' | 'processing' | 'success' | 'error'>('idle');
 
   useEffect(() => {
     if (notification) {
@@ -1998,10 +2071,25 @@ const SalesPOS: React.FC<{
         discount: itemDiscounts + globalDiscount,
         total: Math.max(0, total),
         timestamp: new Date().toISOString(),
-        paymentMethod: 'Dinheiro',
+        paymentMethod,
         sellerName: currentUser.username,
         status: 'active'
       };
+
+      // 1. Processar Pagamento (Simulado para Cartão)
+      if (paymentMethod.includes('Cartão')) {
+        setPaymentStatus('processing');
+        // Simulação de delay de processamento
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        
+        // Simulação de sucesso (95% das vezes)
+        if (Math.random() > 0.05) {
+          setPaymentStatus('success');
+        } else {
+          setPaymentStatus('error');
+          throw new Error('Pagamento recusado pela operadora do cartão.');
+        }
+      }
 
       // 1. Sincronização com Supabase (se online)
       let finalProducts = [...products];
@@ -2065,9 +2153,12 @@ const SalesPOS: React.FC<{
       setShowReceipt(newSale);
       setCart([]);
       setGlobalDiscount(0);
+      setPaymentMethod('Dinheiro');
+      setPaymentStatus('idle');
       setNotification({ message: 'Venda realizada com sucesso!', type: 'success' });
     } catch (error: any) {
       console.error('Erro ao finalizar venda:', error);
+      setPaymentStatus('error');
       setNotification({ 
         message: `Erro: ${error.message || 'Falha na sincronização.'}`, 
         type: 'error' 
@@ -2307,7 +2398,7 @@ const SalesPOS: React.FC<{
                   <h5 className="font-bold text-slate-800 text-base truncate">{prod.name}</h5>
                   <p className="text-amber-600 font-bold mb-2">{prod.price.toLocaleString()} Kz</p>
                   <span className={`text-[10px] font-bold px-2 py-1 rounded-full uppercase self-start ${prod.stock > 10 ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600'}`}>
-                    {prod.stock} em estoque
+                    {prod.stock.toFixed(3)} em estoque
                   </span>
                 </button>
               ))}
@@ -2388,17 +2479,47 @@ const SalesPOS: React.FC<{
                   </span>
                 </div>
               </div>
+
+              {/* Payment Method Selector */}
+              <div className="mb-6 space-y-3">
+                <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Método de Pagamento</p>
+                <div className="grid grid-cols-3 gap-2">
+                  {(['Dinheiro', 'Cartão de Crédito', 'Cartão de Débito'] as const).map(method => (
+                    <button
+                      key={method}
+                      onClick={() => setPaymentMethod(method)}
+                      className={`py-2 px-1 rounded-xl text-[10px] font-bold border transition-all ${
+                        paymentMethod === method 
+                          ? 'bg-amber-50 border-amber-500 text-amber-700 shadow-sm' 
+                          : 'bg-white border-slate-100 text-slate-500 hover:bg-slate-50'
+                      }`}
+                    >
+                      {method === 'Dinheiro' ? <Banknote size={14} className="mx-auto mb-1" /> : <CreditCard size={14} className="mx-auto mb-1" />}
+                      {method.split(' ')[0]}
+                      {method.includes(' ') && <span className="block opacity-60">{method.split(' ').slice(1).join(' ')}</span>}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               <button 
                 onClick={completeSale}
                 disabled={cart.length === 0 || isProcessing}
-                className="w-full bg-amber-600 text-white font-bold py-4 rounded-2xl shadow-lg shadow-amber-200 hover:bg-amber-700 transition-all active:scale-95 disabled:opacity-50 flex flex-col items-center"
+                className={`w-full text-white font-bold py-4 rounded-2xl shadow-lg transition-all active:scale-95 disabled:opacity-50 flex flex-col items-center ${
+                  paymentStatus === 'error' ? 'bg-red-600 shadow-red-200' : 'bg-amber-600 shadow-amber-200 hover:bg-amber-700'
+                }`}
               >
                 {isProcessing ? (
-                  <div className="w-6 h-6 border-2 border-white border-t-transparent rounded-full animate-spin mb-1" />
+                  <div className="flex flex-col items-center">
+                    <div className="w-6 h-6 border-2 border-white border-t-transparent rounded-full animate-spin mb-1" />
+                    <span className="text-[10px] opacity-80">
+                      {paymentMethod.includes('Cartão') ? 'Processando Cartão...' : 'Finalizando...'}
+                    </span>
+                  </div>
                 ) : (
-                  <span>Finalizar Compra</span>
+                  <span>{paymentStatus === 'error' ? 'Tentar Novamente' : 'Finalizar Compra'}</span>
                 )}
-                <span className="text-[10px] opacity-60 font-normal">Atalho: F9 ou Enter</span>
+                {!isProcessing && <span className="text-[10px] opacity-60 font-normal">Atalho: F9 ou Enter</span>}
               </button>
             </div>
           </div>
@@ -2673,6 +2794,7 @@ const SalesPOS: React.FC<{
                 subtotal={showReceipt.subtotal}
                 discount={showReceipt.discount}
                 transactionId={showReceipt.id}
+                paymentMethod={showReceipt.paymentMethod}
                 companyInfo={companyInfo}
                 onClose={() => setShowReceipt(null)}
               />
@@ -2692,6 +2814,9 @@ const FinanceManager: React.FC<{
   employees: Employee[],
   hasPermission: (p: string) => boolean
 }> = ({ expenses, setExpenses, sales, salaryPayments, employees, hasPermission }) => {
+  const [period, setPeriod] = useState<'weekly' | 'monthly' | 'yearly' | 'all' | 'custom'>('monthly');
+  const [startDate, setStartDate] = useState(new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0]);
+  const [endDate, setEndDate] = useState(new Date().toISOString().split('T')[0]);
   const [showAdd, setShowAdd] = useState(false);
   const [newExp, setNewExp] = useState<Partial<Expense>>({});
   const [showFullSalaryHistory, setShowFullSalaryHistory] = useState(false);
@@ -2718,12 +2843,10 @@ const FinanceManager: React.FC<{
         date: new Date().toISOString()
       };
 
-      // 1. Atualizar Estado + LocalStorage (IMEDIATO)
       const updatedExpenses = [...expenses, expenseData];
       setExpenses(updatedExpenses);
       saveToLocal('expenses', updatedExpenses);
 
-      // 2. Sincronizar com Supabase (ASSÍNCRONO)
       const snakeData = toSnakeCase(expenseData);
       supabase.from('expenses').insert(snakeData).then(({ error }) => {
         if (error) console.error('Erro ao sincronizar despesa:', error);
@@ -2735,14 +2858,63 @@ const FinanceManager: React.FC<{
     }
   };
 
-  const activeSales = useMemo(() => sales.filter(s => s.status !== 'voided'), [sales]);
-  const totalSales = activeSales.reduce((acc, s) => acc + s.total, 0);
-  const totalSalaries = salaryPayments.reduce((acc, s) => acc + s.amount, 0);
-  const totalExpenses = expenses.reduce((acc, e) => acc + e.amount, 0);
+  const filteredData = useMemo(() => {
+    const now = new Date();
+    const filter = (dateStr: string) => {
+      const date = new Date(dateStr);
+      if (period === 'all') return true;
+      if (period === 'weekly') {
+        const d = new Date(now);
+        const day = d.getDay();
+        const diff = d.getDate() - day + (day === 0 ? -6 : 1);
+        const startOfWeek = new Date(d.setDate(diff));
+        startOfWeek.setHours(0, 0, 0, 0);
+        return date >= startOfWeek;
+      }
+      if (period === 'monthly') {
+        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+        startOfMonth.setHours(0, 0, 0, 0);
+        return date >= startOfMonth;
+      }
+      if (period === 'yearly') {
+        const startOfYear = new Date(now.getFullYear(), 0, 1);
+        startOfYear.setHours(0, 0, 0, 0);
+        return date >= startOfYear;
+      }
+      if (period === 'custom') {
+        const start = new Date(startDate);
+        start.setHours(0, 0, 0, 0);
+        const end = new Date(endDate);
+        end.setHours(23, 59, 59, 999);
+        return date >= start && date <= end;
+      }
+      return true;
+    };
+
+    return {
+      sales: sales.filter(s => s.status !== 'voided' && filter(s.timestamp)),
+      expenses: expenses.filter(e => filter(e.date)),
+      salaries: salaryPayments.filter(s => filter(s.date))
+    };
+  }, [sales, expenses, salaryPayments, period, startDate, endDate]);
+
+  const totalSales = filteredData.sales.reduce((acc, s) => acc + s.total, 0);
+  
+  const salesByMethod = useMemo(() => {
+    return filteredData.sales.reduce((acc, s) => {
+      const method = s.paymentMethod || 'Dinheiro';
+      acc[method] = (acc[method] || 0) + s.total;
+      return acc;
+    }, {} as Record<string, number>);
+  }, [filteredData.sales]);
+
+  const totalSalaries = filteredData.salaries.reduce((acc, s) => acc + s.amount, 0);
+  const totalExpenses = filteredData.expenses.reduce((acc, e) => acc + e.amount, 0);
+  const netProfit = totalSales - totalSalaries - totalExpenses;
 
   const displayedSalaryPayments = showFullSalaryHistory 
-    ? [...salaryPayments].reverse() 
-    : [...salaryPayments].reverse().slice(0, 3);
+    ? [...filteredData.salaries].reverse() 
+    : [...filteredData.salaries].reverse().slice(0, 3);
 
   const getEmployeeName = (id: string) => {
     return employees.find(e => e.id === id)?.name || 'Funcionário Desconhecido';
@@ -2750,10 +2922,61 @@ const FinanceManager: React.FC<{
 
   return (
     <div className="space-y-8">
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
+        <div>
+          <h3 className="text-xl font-bold text-slate-800 flex items-center gap-2">
+            <Wallet className="text-amber-600" size={24} /> 
+            Gestão Financeira
+          </h3>
+          <p className="text-slate-500 text-sm">Resumo de receitas, despesas e lucros.</p>
+        </div>
+        <div className="flex flex-wrap gap-4 items-center">
+          <div className="flex bg-slate-100 p-1 rounded-xl">
+            {(['weekly', 'monthly', 'yearly', 'all', 'custom'] as const).map((p) => (
+              <button
+                key={p}
+                onClick={() => setPeriod(p)}
+                className={`px-4 py-2 rounded-lg text-xs font-bold uppercase transition-all ${
+                  period === p 
+                    ? 'bg-white text-amber-600 shadow-sm' 
+                    : 'text-slate-500 hover:text-slate-700'
+                }`}
+              >
+                {p === 'weekly' ? 'Semanal' : p === 'monthly' ? 'Mensal' : p === 'yearly' ? 'Anual' : p === 'custom' ? 'Personalizado' : 'Tudo'}
+              </button>
+            ))}
+          </div>
+          {period === 'custom' && (
+            <div className="flex gap-2">
+              <input 
+                type="date"
+                className="p-2 bg-slate-50 border border-slate-100 rounded-xl text-[10px] outline-none focus:ring-2 focus:ring-amber-500"
+                value={startDate}
+                onChange={e => setStartDate(e.target.value)}
+              />
+              <input 
+                type="date"
+                className="p-2 bg-slate-50 border border-slate-100 rounded-xl text-[10px] outline-none focus:ring-2 focus:ring-amber-500"
+                value={endDate}
+                onChange={e => setEndDate(e.target.value)}
+              />
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
         <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
           <p className="text-xs font-bold text-slate-400 uppercase mb-1">Receita de Vendas</p>
           <h4 className="text-2xl font-bold text-green-600">{totalSales.toLocaleString()} Kz</h4>
+          <div className="mt-4 pt-4 border-t border-slate-50 space-y-2">
+            {Object.entries(salesByMethod).map(([method, amount]) => (
+              <div key={method} className="flex justify-between items-center text-[10px] font-bold">
+                <span className="text-slate-400 uppercase">{method}</span>
+                <span className="text-slate-600">{amount.toLocaleString()} Kz</span>
+              </div>
+            ))}
+          </div>
         </div>
         <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
           <p className="text-xs font-bold text-slate-400 uppercase mb-1">Folha Salarial</p>
@@ -2762,6 +2985,15 @@ const FinanceManager: React.FC<{
         <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
           <p className="text-xs font-bold text-slate-400 uppercase mb-1">Custos Operacionais</p>
           <h4 className="text-2xl font-bold text-amber-600">{totalExpenses.toLocaleString()} Kz</h4>
+        </div>
+        <div className={`p-6 rounded-3xl border shadow-sm ${netProfit >= 0 ? 'bg-slate-800 border-slate-700' : 'bg-red-900 border-red-800'}`}>
+          <p className="text-xs font-bold text-slate-400 uppercase mb-1">Resultado Líquido</p>
+          <h4 className={`text-2xl font-bold ${netProfit >= 0 ? 'text-white' : 'text-red-200'}`}>
+            {netProfit.toLocaleString()} Kz
+          </h4>
+          <p className="text-[10px] text-slate-400 mt-2 italic">
+            {netProfit >= 0 ? 'Lucro no período' : 'Prejuízo no período'}
+          </p>
         </div>
       </div>
 
@@ -2896,7 +3128,7 @@ const FinanceManager: React.FC<{
               </tr>
             </thead>
             <tbody className="text-sm divide-y divide-slate-50">
-              {expenses.map(exp => (
+              {filteredData.expenses.map(exp => (
                 <tr key={exp.id} className="hover:bg-slate-50/50 transition-colors">
                   <td className="py-4 text-slate-500">{new Date(exp.date).toLocaleDateString()}</td>
                   <td className="py-4 text-slate-800 font-medium">{exp.description}</td>
@@ -2906,9 +3138,9 @@ const FinanceManager: React.FC<{
                   <td className="py-4 text-right font-bold text-slate-800">{exp.amount.toLocaleString()} Kz</td>
                 </tr>
               ))}
-              {expenses.length === 0 && (
+              {filteredData.expenses.length === 0 && (
                 <tr>
-                  <td colSpan={4} className="py-20 text-center text-slate-400">Nenhuma despesa registada.</td>
+                  <td colSpan={4} className="py-20 text-center text-slate-400">Nenhuma despesa registada no período.</td>
                 </tr>
               )}
             </tbody>
@@ -2934,7 +3166,12 @@ const UserManager: React.FC<{
   const validateUser = () => {
     const newErrors: Record<string, string> = {};
     if (!newUser.username || newUser.username.trim().length < 3) newErrors.username = 'Utilizador deve ter pelo menos 3 caracteres';
-    if (!newUser.password || newUser.password.length < 3) newErrors.password = 'Senha deve ter pelo menos 3 caracteres';
+    
+    // Skip password validation if editing an admin (since field is hidden)
+    const isEditingAdmin = editingId && newUser.role === UserRole.ADMIN;
+    if (!isEditingAdmin) {
+      if (!newUser.password || newUser.password.length < 3) newErrors.password = 'Senha deve ter pelo menos 3 caracteres';
+    }
     
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
@@ -3096,16 +3333,22 @@ const UserManager: React.FC<{
             </div>
             <div>
               <label className="text-xs font-bold text-slate-500 uppercase mb-2 block">Senha</label>
-              <input 
-                type="password"
-                className={`w-full p-3 border rounded-xl focus:ring-2 focus:ring-amber-500 outline-none ${errors.password ? 'border-red-500 bg-red-50' : 'border-slate-200'}`}
-                value={newUser.password || ''}
-                onChange={e => {
-                  setNewUser({...newUser, password: e.target.value});
-                  if (errors.password) setErrors({...errors, password: ''});
-                }}
-                placeholder="••••••"
-              />
+              {editingId && newUser.role === UserRole.ADMIN ? (
+                <div className="w-full p-3 border border-slate-200 rounded-xl bg-slate-50 text-slate-400 font-mono flex items-center h-[46px]">
+                  ••••••••
+                </div>
+              ) : (
+                <input 
+                  type="password"
+                  className={`w-full p-3 border rounded-xl focus:ring-2 focus:ring-amber-500 outline-none ${errors.password ? 'border-red-500 bg-red-50' : 'border-slate-200'}`}
+                  value={newUser.password || ''}
+                  onChange={e => {
+                    setNewUser({...newUser, password: e.target.value});
+                    if (errors.password) setErrors({...errors, password: ''});
+                  }}
+                  placeholder="••••••"
+                />
+              )}
               {errors.password && <p className="text-[10px] text-red-500 mt-1 font-bold">{errors.password}</p>}
             </div>
             <div>
@@ -3189,9 +3432,16 @@ const UserManager: React.FC<{
 const ReportsManager: React.FC<{
   productionLogs: ProductionLog[],
   products: Product[],
-  ingredients: Ingredient[]
-}> = ({ productionLogs, products, ingredients }) => {
-  const [period, setPeriod] = useState<'weekly' | 'monthly' | 'yearly'>('monthly');
+  ingredients: Ingredient[],
+  companyInfo: CompanyInfo
+}> = ({ productionLogs, products, ingredients, companyInfo }) => {
+  const [period, setPeriod] = useState<'weekly' | 'monthly' | 'yearly' | 'all' | 'custom'>('monthly');
+  const [startDate, setStartDate] = useState(new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0]);
+  const [endDate, setEndDate] = useState(new Date().toISOString().split('T')[0]);
+  const [selectedProductId, setSelectedProductId] = useState<string>('all');
+  const [selectedIngredientId, setSelectedIngredientId] = useState<string>('all');
+  const [showDetailed, setShowDetailed] = useState(false);
+  const [showFilters, setShowFilters] = useState(false);
 
   const downloadCSV = (content: string, filename: string) => {
     const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
@@ -3231,7 +3481,7 @@ const ReportsManager: React.FC<{
     const headers = ['Insumo', 'Quantidade Usada', 'Unidade'];
     const data = ingredientStats.map(ing => ({
       'Insumo': ing.name,
-      'Quantidade Usada': ing.amount.toFixed(2),
+      'Quantidade Usada': ing.amount.toFixed(3),
       'Unidade': ing.unit
     }));
     
@@ -3247,21 +3497,138 @@ const ReportsManager: React.FC<{
     downloadCSV(csvContent, `consumo_insumos_${period}_${new Date().toISOString().split('T')[0]}.csv`);
   };
 
+  const exportPDF = () => {
+    const doc = new jsPDF();
+    const dateStr = new Date().toLocaleDateString('pt-AO');
+    const periodLabel = period === 'weekly' ? 'Semanal' : 
+                       period === 'monthly' ? 'Mensal' : 
+                       period === 'yearly' ? 'Anual' : 
+                       period === 'custom' ? `Personalizado (${new Date(startDate).toLocaleDateString('pt-AO')} - ${new Date(endDate).toLocaleDateString('pt-AO')})` : 
+                       'Tudo';
+
+    // Header
+    doc.setFontSize(20);
+    doc.setTextColor(245, 158, 11); // amber-600
+    doc.text(companyInfo.name.toUpperCase(), 14, 22);
+    
+    doc.setFontSize(10);
+    doc.setTextColor(100, 116, 139); // slate-500
+    doc.text('Relatório de Produção - ' + periodLabel, 14, 30);
+    
+    let filterText = '';
+    if (selectedProductId !== 'all') {
+      const prod = products.find(p => p.id === selectedProductId);
+      filterText += `Produto: ${prod?.name || selectedProductId} | `;
+    }
+    if (selectedIngredientId !== 'all') {
+      filterText += `Insumo: ${selectedIngredientId} | `;
+    }
+    
+    if (filterText) {
+      doc.text('Filtros: ' + filterText.slice(0, -3), 14, 35);
+      doc.text('Data de Emissão: ' + dateStr, 14, 40);
+    } else {
+      doc.text('Data de Emissão: ' + dateStr, 14, 35);
+    }
+    
+    // Summary
+    doc.setFontSize(14);
+    doc.setTextColor(30, 41, 59); // slate-800
+    doc.text('Resumo do Período', 14, 50);
+    
+    autoTable(doc, {
+      startY: 55,
+      head: [['Métrica', 'Valor']],
+      body: [
+        ['Total de Produções', filteredLogs.length.toString()],
+        ['Total de Itens Produzidos', productStats.reduce((acc, s) => acc + s.quantity, 0).toString()],
+      ],
+      theme: 'striped',
+      headStyles: { fillColor: [245, 158, 11] }
+    });
+
+    // Top Products
+    doc.text('Produtos Fabricados', 14, (doc as any).lastAutoTable.finalY + 15);
+    autoTable(doc, {
+      startY: (doc as any).lastAutoTable.finalY + 20,
+      head: [['Produto', 'Quantidade']],
+      body: productStats.map(p => [p.name, p.quantity.toString()]),
+      theme: 'striped',
+      headStyles: { fillColor: [245, 158, 11] }
+    });
+
+    // Ingredients
+    doc.text('Consumo de Insumos', 14, (doc as any).lastAutoTable.finalY + 15);
+    autoTable(doc, {
+      startY: (doc as any).lastAutoTable.finalY + 20,
+      head: [['Insumo', 'Quantidade', 'Unidade']],
+      body: ingredientStats.map(i => [i.name, i.amount.toFixed(3), i.unit]),
+      theme: 'striped',
+      headStyles: { fillColor: [245, 158, 11] }
+    });
+
+    // Detailed Logs if requested or just add it anyway
+    if (filteredLogs.length > 0) {
+      doc.addPage();
+      doc.text('Registos Detalhados de Produção', 14, 22);
+      autoTable(doc, {
+        startY: 30,
+        head: [['Data', 'Produto', 'Qtd', 'Vendedor']],
+        body: filteredLogs.map(log => [
+          new Date(log.timestamp).toLocaleString('pt-AO'),
+          log.productName,
+          log.quantity.toString(),
+          log.sellerName
+        ]),
+        theme: 'striped',
+        headStyles: { fillColor: [245, 158, 11] }
+      });
+    }
+
+    doc.save(`relatorio_producao_${period}_${new Date().toISOString().split('T')[0]}.pdf`);
+  };
+
   const filteredLogs = useMemo(() => {
     const now = new Date();
+
     return productionLogs.filter(log => {
       const logDate = new Date(log.timestamp);
+      
+      // 1. Date Filtering
+      let dateMatch = true;
       if (period === 'weekly') {
-        const weekAgo = new Date();
-        weekAgo.setDate(now.getDate() - 7);
-        return logDate >= weekAgo;
+        const d = new Date(now);
+        const day = d.getDay();
+        const diff = d.getDate() - day + (day === 0 ? -6 : 1);
+        const startOfWeek = new Date(d.setDate(diff));
+        startOfWeek.setHours(0, 0, 0, 0);
+        dateMatch = logDate >= startOfWeek;
       } else if (period === 'monthly') {
-        return logDate.getMonth() === now.getMonth() && logDate.getFullYear() === now.getFullYear();
-      } else {
-        return logDate.getFullYear() === now.getFullYear();
+        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+        startOfMonth.setHours(0, 0, 0, 0);
+        dateMatch = logDate >= startOfMonth;
+      } else if (period === 'yearly') {
+        const startOfYear = new Date(now.getFullYear(), 0, 1);
+        startOfYear.setHours(0, 0, 0, 0);
+        dateMatch = logDate >= startOfYear;
+      } else if (period === 'custom') {
+        const start = new Date(startDate);
+        start.setHours(0, 0, 0, 0);
+        const end = new Date(endDate);
+        end.setHours(23, 59, 59, 999);
+        dateMatch = logDate >= start && logDate <= end;
       }
+
+      // 2. Product Filtering
+      const productMatch = selectedProductId === 'all' || log.productId === selectedProductId;
+
+      // 3. Ingredient Filtering
+      const ingredientMatch = selectedIngredientId === 'all' || 
+        log.ingredientsUsed.some(ing => ing.ingredientName.toLowerCase() === selectedIngredientId.toLowerCase());
+
+      return dateMatch && productMatch && ingredientMatch;
     });
-  }, [productionLogs, period]);
+  }, [productionLogs, period, startDate, endDate, selectedProductId, selectedIngredientId]);
 
   const productStats = useMemo(() => {
     const stats: Record<string, { name: string, quantity: number }> = {};
@@ -3302,7 +3669,7 @@ const ReportsManager: React.FC<{
         </div>
         <div className="flex flex-wrap gap-4 items-center">
           <div className="flex bg-slate-100 p-1 rounded-xl">
-            {(['weekly', 'monthly', 'yearly'] as const).map((p) => (
+            {(['weekly', 'monthly', 'yearly', 'all', 'custom'] as const).map((p) => (
               <button
                 key={p}
                 onClick={() => setPeriod(p)}
@@ -3312,10 +3679,18 @@ const ReportsManager: React.FC<{
                     : 'text-slate-500 hover:text-slate-700'
                 }`}
               >
-                {p === 'weekly' ? 'Semanal' : p === 'monthly' ? 'Mensal' : 'Anual'}
+                {p === 'weekly' ? 'Semanal' : p === 'monthly' ? 'Mensal' : p === 'yearly' ? 'Anual' : p === 'custom' ? 'Personalizado' : 'Tudo'}
               </button>
             ))}
           </div>
+          <button 
+            onClick={() => setShowFilters(!showFilters)}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+              showFilters ? 'bg-amber-100 text-amber-600' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+            }`}
+          >
+            <Settings size={14} /> Filtros {showFilters ? 'Ativos' : 'Avançados'}
+          </button>
           <div className="flex gap-2">
             <button 
               onClick={exportProductionCSV}
@@ -3331,9 +3706,81 @@ const ReportsManager: React.FC<{
             >
               <Download size={14} /> Insumos
             </button>
+            <button 
+              onClick={exportPDF}
+              className="flex items-center gap-2 px-4 py-2 bg-amber-600 text-white rounded-xl text-xs font-bold hover:bg-amber-700 transition-all shadow-md active:scale-95"
+              title="Exportar Relatório Completo para PDF"
+            >
+              <FileText size={14} /> Baixar PDF
+            </button>
           </div>
         </div>
       </div>
+
+      {showFilters && (
+        <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm grid grid-cols-1 md:grid-cols-4 gap-6 animate-in slide-in-from-top-4 duration-300">
+          {period === 'custom' && (
+            <>
+              <div>
+                <label className="text-[10px] font-bold text-slate-400 uppercase mb-2 block">Data Inicial</label>
+                <input 
+                  type="date"
+                  className="w-full p-3 bg-slate-50 border border-slate-100 rounded-xl text-sm outline-none focus:ring-2 focus:ring-amber-500"
+                  value={startDate}
+                  onChange={e => setStartDate(e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-slate-400 uppercase mb-2 block">Data Final</label>
+                <input 
+                  type="date"
+                  className="w-full p-3 bg-slate-50 border border-slate-100 rounded-xl text-sm outline-none focus:ring-2 focus:ring-amber-500"
+                  value={endDate}
+                  onChange={e => setEndDate(e.target.value)}
+                />
+              </div>
+            </>
+          )}
+          <div className={period !== 'custom' ? 'md:col-span-2' : ''}>
+            <label className="text-[10px] font-bold text-slate-400 uppercase mb-2 block">Filtrar por Produto</label>
+            <select 
+              className="w-full p-3 bg-slate-50 border border-slate-100 rounded-xl text-sm outline-none focus:ring-2 focus:ring-amber-500"
+              value={selectedProductId}
+              onChange={e => setSelectedProductId(e.target.value)}
+            >
+              <option value="all">Todos os Produtos</option>
+              {products.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+          </div>
+          <div className={period !== 'custom' ? 'md:col-span-2' : ''}>
+            <label className="text-[10px] font-bold text-slate-400 uppercase mb-2 block">Filtrar por Insumo</label>
+            <select 
+              className="w-full p-3 bg-slate-50 border border-slate-100 rounded-xl text-sm outline-none focus:ring-2 focus:ring-amber-500"
+              value={selectedIngredientId}
+              onChange={e => setSelectedIngredientId(e.target.value)}
+            >
+              <option value="all">Todos os Insumos</option>
+              {Array.from(new Set(ingredients.map(i => i.name))).map(name => (
+                <option key={name} value={name}>{name}</option>
+              ))}
+            </select>
+          </div>
+          <div className="md:col-span-4 flex justify-end">
+            <button 
+              onClick={() => {
+                setPeriod('monthly');
+                setSelectedProductId('all');
+                setSelectedIngredientId('all');
+                setStartDate(new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0]);
+                setEndDate(new Date().toISOString().split('T')[0]);
+              }}
+              className="text-[10px] font-bold text-slate-400 hover:text-amber-600 transition-colors flex items-center gap-1"
+            >
+              <XCircle size={12} /> Limpar Todos os Filtros
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
         {/* Products Chart */}
@@ -3402,7 +3849,7 @@ const ReportsManager: React.FC<{
                   <tr key={idx} className="hover:bg-slate-50 transition-colors">
                     <td className="p-4 font-medium text-slate-700">{ing.name}</td>
                     <td className="p-4 text-right font-bold text-amber-600">
-                      {ing.amount.toFixed(2)} {ing.unit}
+                      {ing.amount.toFixed(3)} {ing.unit}
                     </td>
                   </tr>
                 ))}
@@ -3450,6 +3897,84 @@ const ReportsManager: React.FC<{
             </table>
           </div>
         </div>
+      </div>
+
+      {/* Detailed Logs Section */}
+      <div className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden mt-8">
+        <div className="p-6 border-b border-slate-50 flex justify-between items-center bg-slate-50/50">
+          <div className="flex items-center gap-3">
+            <div className="bg-amber-100 p-2 rounded-lg">
+              <History size={18} className="text-amber-600" />
+            </div>
+            <div>
+              <h4 className="font-bold text-slate-800">Registos Detalhados de Produção</h4>
+              <p className="text-[10px] text-slate-400 font-medium uppercase">Lista cronológica de todas as produções no período</p>
+            </div>
+          </div>
+          <button 
+            onClick={() => setShowDetailed(!showDetailed)}
+            className="flex items-center gap-2 text-xs font-bold text-amber-600 hover:text-amber-700 transition-colors"
+          >
+            {showDetailed ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+            {showDetailed ? 'Ocultar Detalhes' : 'Ver Detalhes'}
+          </button>
+        </div>
+        
+        {showDetailed && (
+          <div className="overflow-x-auto animate-in slide-in-from-top duration-300">
+            <table className="w-full">
+              <thead>
+                <tr className="text-left text-slate-400 text-[10px] uppercase tracking-wider bg-slate-50/30">
+                  <th className="p-6">Data / Hora</th>
+                  <th className="p-6">Produto</th>
+                  <th className="p-6 text-center">Quantidade</th>
+                  <th className="p-6">Vendedor</th>
+                  <th className="p-6">Insumos Utilizados</th>
+                </tr>
+              </thead>
+              <tbody className="text-sm divide-y divide-slate-50">
+                {filteredLogs.map((log, idx) => (
+                  <tr key={idx} className="hover:bg-slate-50/50 transition-colors group">
+                    <td className="p-6">
+                      <p className="font-bold text-slate-800">{new Date(log.timestamp).toLocaleDateString('pt-AO')}</p>
+                      <p className="text-[10px] text-slate-400">{new Date(log.timestamp).toLocaleTimeString('pt-AO')}</p>
+                    </td>
+                    <td className="p-6">
+                      <span className="font-medium text-slate-700">{log.productName}</span>
+                    </td>
+                    <td className="p-6 text-center">
+                      <span className="px-3 py-1 bg-amber-50 text-amber-600 rounded-full text-xs font-black">
+                        {log.quantity}
+                      </span>
+                    </td>
+                    <td className="p-6">
+                      <div className="flex items-center gap-2">
+                        <div className="w-6 h-6 bg-slate-100 rounded-full flex items-center justify-center text-[10px] font-bold text-slate-500">
+                          {(log.sellerName || 'S').charAt(0).toUpperCase()}
+                        </div>
+                        <span className="text-slate-600">{log.sellerName || 'Sistema'}</span>
+                      </div>
+                    </td>
+                    <td className="p-6">
+                      <div className="flex flex-wrap gap-1">
+                        {log.ingredientsUsed.map((ing, iIdx) => (
+                          <span key={iIdx} className="px-2 py-0.5 bg-slate-100 text-slate-500 rounded text-[9px] font-medium">
+                            {ing.ingredientName}: {ing.amount.toFixed(3)}{ing.unit}
+                          </span>
+                        ))}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+                {filteredLogs.length === 0 && (
+                  <tr>
+                    <td colSpan={5} className="py-20 text-center text-slate-400 italic">Nenhum registo encontrado para este período.</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
   );
