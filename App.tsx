@@ -1120,6 +1120,14 @@ const InventoryManager: React.FC<{
   const [showInitialStock, setShowInitialStock] = useState(false);
   const [initialStockProdId, setInitialStockProdId] = useState<string>('');
   const [initialStockQty, setInitialStockQty] = useState<number>(0);
+  const [stockThreshold, setStockThreshold] = useState<number>(() => {
+    const saved = localStorage.getItem('stockThreshold');
+    return saved ? Number(saved) : 10;
+  });
+
+  useEffect(() => {
+    localStorage.setItem('stockThreshold', stockThreshold.toString());
+  }, [stockThreshold]);
 
   const canManage = hasPermission('manage:inventory');
 
@@ -1630,7 +1638,18 @@ const InventoryManager: React.FC<{
       {/* Produtos para Venda */}
       <section className="space-y-6">
         <div className="flex justify-between items-center">
-          <h3 className="text-xl font-bold text-slate-800 flex items-center gap-2"><ChefHat size={20}/> Produtos Prontos</h3>
+          <div className="flex items-center gap-4">
+            <h3 className="text-xl font-bold text-slate-800 flex items-center gap-2"><ChefHat size={20}/> Produtos Prontos</h3>
+            <div className="flex items-center gap-2 bg-slate-50 px-3 py-1.5 rounded-xl border border-slate-200">
+              <span className="text-[10px] font-bold text-slate-400 uppercase">Alerta de Estoque:</span>
+              <input 
+                type="number" 
+                className="w-16 bg-transparent text-xs font-bold text-slate-700 outline-none"
+                value={stockThreshold}
+                onChange={e => setStockThreshold(Number(e.target.value))}
+              />
+            </div>
+          </div>
           {canManage && (
             <button 
               onClick={() => {
@@ -1795,17 +1814,22 @@ const InventoryManager: React.FC<{
                   <Package size={48} />
                 )}
               </div>
-              <h5 className="font-bold text-slate-800">{prod.name}</h5>
+              <h5 className="font-bold text-slate-800 flex items-center gap-2">
+                {prod.name}
+                {prod.stock < stockThreshold && (
+                  <AlertTriangle size={14} className="text-red-500 animate-pulse" title="Estoque Baixo" />
+                )}
+              </h5>
               <p className="text-amber-600 font-black text-xl mb-1">{prod.price.toLocaleString()} Kz</p>
               <p className="text-[10px] text-slate-400 mb-2 uppercase font-bold">
                 Lançado em: {prod.createdAt ? new Date(prod.createdAt).toLocaleDateString('pt-AO') : 'N/A'}
               </p>
               <div className="flex justify-between text-xs font-bold text-slate-400">
                 <span>ESTOQUE</span>
-                <span className={prod.stock < 20 ? 'text-red-500' : 'text-slate-700'}>{prod.stock.toFixed(3)} un.</span>
+                <span className={prod.stock < stockThreshold ? 'text-red-500' : 'text-slate-700'}>{prod.stock.toFixed(3)} un.</span>
               </div>
               <div className="mt-2 h-1 w-full bg-slate-100 rounded-full overflow-hidden">
-                <div className={`h-full transition-all ${prod.stock < 20 ? 'bg-red-500' : 'bg-green-500'}`} style={{ width: `${Math.min(prod.stock, 100)}%` }}></div>
+                <div className={`h-full transition-all ${prod.stock < stockThreshold ? 'bg-red-500' : 'bg-green-500'}`} style={{ width: `${Math.min(prod.stock, 100)}%` }}></div>
               </div>
             </div>
           ))}
