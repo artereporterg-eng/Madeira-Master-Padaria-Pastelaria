@@ -169,8 +169,57 @@ const App: React.FC = () => {
 
   const [isOnline, setIsOnline] = useState<boolean>(isSupabaseConfigured);
 
+  const syncDatabaseSchema = async () => {
+    if (!isSupabaseConfigured) return;
+
+    const REQUIRED_TABLES: Record<string, string> = {
+      users: `CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, username TEXT UNIQUE NOT NULL, password TEXT, role TEXT NOT NULL);`,
+      employees: `CREATE TABLE IF NOT EXISTS employees (id TEXT PRIMARY KEY, name TEXT NOT NULL, category TEXT NOT NULL, salary NUMERIC NOT NULL, hired_date TEXT NOT NULL, photo TEXT, curriculum TEXT, id_card TEXT, payment_method TEXT, iban TEXT, signed_receipt TEXT);`,
+      salary_payments: `CREATE TABLE IF NOT EXISTS salary_payments (id TEXT PRIMARY KEY, employee_id TEXT, amount NUMERIC NOT NULL, date TEXT NOT NULL, month TEXT NOT NULL, proof TEXT);`,
+      expenses: `CREATE TABLE IF NOT EXISTS expenses (id TEXT PRIMARY KEY, description TEXT NOT NULL, amount NUMERIC NOT NULL, category TEXT NOT NULL, date TEXT NOT NULL);`,
+      ingredients: `CREATE TABLE IF NOT EXISTS ingredients (id TEXT PRIMARY KEY, name TEXT NOT NULL, unit TEXT NOT NULL, quantity NUMERIC NOT NULL, cost_per_unit NUMERIC NOT NULL, created_at TEXT);`,
+      products: `CREATE TABLE IF NOT EXISTS products (id TEXT PRIMARY KEY, name TEXT NOT NULL, price NUMERIC NOT NULL, stock NUMERIC NOT NULL, image TEXT, created_at TEXT NOT NULL, recipe JSONB NOT NULL, recipe_yield NUMERIC NOT NULL);`,
+      sales: `CREATE TABLE IF NOT EXISTS sales (id TEXT PRIMARY KEY, items JSONB NOT NULL, subtotal NUMERIC NOT NULL, discount NUMERIC NOT NULL, total NUMERIC NOT NULL, timestamp TEXT NOT NULL, payment_method TEXT NOT NULL, seller_name TEXT NOT NULL, status TEXT);`,
+      production_logs: `CREATE TABLE IF NOT EXISTS production_logs (id TEXT PRIMARY KEY, product_id TEXT, product_name TEXT NOT NULL, quantity NUMERIC NOT NULL, timestamp TEXT NOT NULL, ingredients_used JSONB NOT NULL, seller_name TEXT);`,
+      company_info: `CREATE TABLE IF NOT EXISTS company_info (id BIGINT PRIMARY KEY GENERATED ALWAYS AS IDENTITY, name TEXT NOT NULL, nif TEXT NOT NULL, address TEXT NOT NULL, contact TEXT NOT NULL);`
+    };
+
+    try {
+      // Consultar tabelas existentes
+      const { data: existingTables, error: checkError } = await supabase
+        .from('information_schema.tables' as any)
+        .select('table_name')
+        .eq('table_schema', 'public');
+
+      const existingNames = existingTables?.map((t: any) => t.table_name) || [];
+
+      for (const [tableName, sql] of Object.entries(REQUIRED_TABLES)) {
+        if (!existingNames.includes(tableName)) {
+          // Criar tabela via RPC
+          const { error: createError } = await supabase.rpc('gerir_tabelas_automatico', { sql_comando: sql });
+          if (createError) {
+            console.error(`Erro ao criar tabela ${tableName}:`, createError);
+            continue;
+          }
+
+          // Desativar RLS
+          await supabase.rpc('gerir_tabelas_automatico', { 
+            sql_comando: `ALTER TABLE ${tableName} DISABLE ROW LEVEL SECURITY;` 
+          });
+          
+          console.log(`Tabela ${tableName} criada com sucesso!`);
+        }
+      }
+    } catch (err) {
+      console.error('Erro no syncDatabaseSchema:', err);
+    }
+  };
+
   // Efeito de Inicialização: Carrega do LocalStorage primeiro, depois sincroniza com Supabase
   useEffect(() => {
+    // Sincronizar esquema se necessário
+    syncDatabaseSchema();
+
     // Verificar conexão periodicamente
     const interval = setInterval(async () => {
       const status = await checkConnection();
@@ -2290,14 +2339,24 @@ const SalesPOS: React.FC<{
   };
 
   const handleAuthVoid = () => {
-    const admin = users.find(u => u.username === authData.username && u.password === authData.password && u.role === UserRole.ADMIN);
-    if (admin) {
+    const authorizedUser = users.find(u => u.username === authData.username && u.password === authData.password && (u.role === UserRole.ADMIN || u.role === UserRole.MANAGER));
+    
+    if (authorizedUser) {
       if (authModal.sale) {
+        const isLastSale = sales.length > 0 && sales[sales.length - 1].id === authModal.sale.id;
+        
+        if (authorizedUser.role === UserRole.MANAGER && !isLastSale) {
+          setAuthError('Gerentes só podem anular a última venda. Anulação total restrita a administradores.');
+          return;
+        }
+        
         voidSale(authModal.sale, true, true);
         setAuthModal({ isOpen: false, sale: null });
+        setAuthData({ username: '', password: '' });
+        setAuthError('');
       }
     } else {
-      setAuthError('Credenciais de administrador inválidas.');
+      setAuthError('Credenciais inválidas ou sem permissão suficiente.');
     }
   };
 
@@ -2701,11 +2760,11 @@ const SalesPOS: React.FC<{
               </button>
             </div>
             <p className="text-slate-500 text-sm mb-6">
-              Esta ação requer privilégios de administrador. Por favor, insira as credenciais.
+              Esta ação requer privilégios de administrador ou gerente. Por favor, insira as credenciais.
             </p>
             <div className="space-y-4">
               <div>
-                <label className="block text-xs font-bold text-slate-400 uppercase mb-2">Utilizador Admin</label>
+                <label className="block text-xs font-bold text-slate-400 uppercase mb-2">Utilizador Autorizado</label>
                 <input 
                   type="text"
                   value={authData.username}
